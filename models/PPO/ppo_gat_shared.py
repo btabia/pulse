@@ -58,6 +58,7 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
         ##### GAT config #####
         self.gat_in_channels = 16
         self.gat_hidden_channels_1 = 32
+        self.gat_hidden_channels_2 = 64
         self.gat_out_channels = 64
 
         self.gat_heads_1 = 4

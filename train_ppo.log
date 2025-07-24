@@ -1,0 +1,613 @@
+[2025-07-24 20:40:21,302][asyncio][DEBUG] - Using selector: EpollSelector
+[2025-07-24 20:40:23,054][AutoNode][DEBUG] - Defining data type 'any' as 'Any'
+[2025-07-24 20:40:23,054][AutoNode][DEBUG] - Defining data type 'bool' as 'Bool' and array 'BoolArray
+[2025-07-24 20:40:23,054][AutoNode][DEBUG] - Defining data type 'bundle' as 'Bundle'
+[2025-07-24 20:40:23,054][AutoNode][DEBUG] - Defining data type 'colord[3]' as 'Color3d' and array 'Color3dArray
+[2025-07-24 20:40:23,054][AutoNode][DEBUG] - Defining data type 'colorf[3]' as 'Color3f' and array 'Color3fArray
+[2025-07-24 20:40:23,054][AutoNode][DEBUG] - Defining data type 'colorh[3]' as 'Color3h' and array 'Color3hArray
+[2025-07-24 20:40:23,054][AutoNode][DEBUG] - Defining data type 'colord[4]' as 'Color4d' and array 'Color4dArray
+[2025-07-24 20:40:23,054][AutoNode][DEBUG] - Defining data type 'colorf[4]' as 'Color4f' and array 'Color4fArray
+[2025-07-24 20:40:23,054][AutoNode][DEBUG] - Defining data type 'colorh[4]' as 'Color4h' and array 'Color4hArray
+[2025-07-24 20:40:23,054][AutoNode][DEBUG] - Defining data type 'double' as 'Double' and array 'DoubleArray
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'double[2]' as 'Double2' and array 'Double2Array
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'double[3]' as 'Double3' and array 'Double3Array
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'double[4]' as 'Double4' and array 'Double4Array
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'execution' as 'Execution'
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'float' as 'Float' and array 'FloatArray
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'float[2]' as 'Float2' and array 'Float2Array
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'float[3]' as 'Float3' and array 'Float3Array
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'float[4]' as 'Float4' and array 'Float4Array
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'frame[4]' as 'Frame' and array 'FrameArray
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'half' as 'Half' and array 'HalfArray
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'half[2]' as 'Half2' and array 'Half2Array
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'half[3]' as 'Half3' and array 'Half3Array
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'half[4]' as 'Half4' and array 'Half4Array
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'int' as 'Int' and array 'IntArray
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'int[2]' as 'Int2' and array 'Int2Array
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'int[3]' as 'Int3' and array 'Int3Array
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'int[4]' as 'Int4' and array 'Int4Array
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'int64' as 'Int64' and array 'Int64Array
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'matrixd[2]' as 'Matrix2d' and array 'Matrix2dArray
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'matrixd[3]' as 'Matrix3d' and array 'Matrix3dArray
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'matrixd[4]' as 'Matrix4d' and array 'Matrix4dArray
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'normald[3]' as 'Normal3d' and array 'Normal3dArray
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'normalf[3]' as 'Normal3f' and array 'Normal3fArray
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'normalh[3]' as 'Normal3h' and array 'Normal3hArray
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'objectId' as 'ObjectId' and array 'ObjectIdArray
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'path' as 'Path'
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'pointd[3]' as 'Point3d' and array 'Point3dArray
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'pointf[3]' as 'Point3f' and array 'Point3fArray
+[2025-07-24 20:40:23,055][AutoNode][DEBUG] - Defining data type 'pointh[3]' as 'Point3h' and array 'Point3hArray
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'quatd[4]' as 'Quatd' and array 'QuatdArray
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'quatf[4]' as 'Quatf' and array 'QuatfArray
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'quath[4]' as 'Quath' and array 'QuathArray
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'string' as 'String'
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'target' as 'Target'
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'texcoordd[2]' as 'TexCoord2d' and array 'TexCoord2dArray
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'texcoordf[2]' as 'TexCoord2f' and array 'TexCoord2fArray
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'texcoordh[2]' as 'TexCoord2h' and array 'TexCoord2hArray
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'texcoordd[3]' as 'TexCoord3d' and array 'TexCoord3dArray
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'texcoordf[3]' as 'TexCoord3f' and array 'TexCoord3fArray
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'texcoordh[3]' as 'TexCoord3h' and array 'TexCoord3hArray
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'timecode' as 'Timecode' and array 'TimecodeArray
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'token' as 'Token' and array 'TokenArray
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'uchar' as 'UChar' and array 'UCharArray
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'uint' as 'UInt' and array 'UIntArray
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'uint64' as 'UInt64' and array 'UInt64Array
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'vectord[3]' as 'Vector3d' and array 'Vector3dArray
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'vectorf[3]' as 'Vector3f' and array 'Vector3fArray
+[2025-07-24 20:40:23,056][AutoNode][DEBUG] - Defining data type 'vectorh[3]' as 'Vector3h' and array 'Vector3hArray
+[2025-07-24 20:40:24,345][trimesh][DEBUG] - falling back to hashlib hashing: `pip install xxhash`for 50x faster cache checks
+[2025-07-24 20:40:24,577][h5py._conv][DEBUG] - Creating converter from 7 to 5
+[2025-07-24 20:40:24,577][h5py._conv][DEBUG] - Creating converter from 5 to 7
+[2025-07-24 20:40:24,577][h5py._conv][DEBUG] - Creating converter from 7 to 5
+[2025-07-24 20:40:24,577][h5py._conv][DEBUG] - Creating converter from 5 to 7
+[2025-07-24 20:40:24,623][matplotlib][DEBUG] - matplotlib data path: /home/btabia/anaconda3/envs/pulse/lib/python3.10/site-packages/matplotlib/mpl-data
+[2025-07-24 20:40:24,626][matplotlib][DEBUG] - CONFIGDIR=/home/btabia/.config/matplotlib
+[2025-07-24 20:40:24,627][matplotlib][DEBUG] - interactive is False
+[2025-07-24 20:40:24,627][matplotlib][DEBUG] - platform is linux
+[2025-07-24 20:41:52,402][matplotlib][DEBUG] - CACHEDIR=/home/btabia/.cache/matplotlib
+[2025-07-24 20:41:52,403][matplotlib.font_manager][DEBUG] - Using fontManager instance from /home/btabia/.cache/matplotlib/fontlist-v390.json
+[2025-07-24 20:43:09,967][asyncio][DEBUG] - Using selector: EpollSelector
+[2025-07-24 20:43:11,619][AutoNode][DEBUG] - Defining data type 'any' as 'Any'
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'bool' as 'Bool' and array 'BoolArray
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'bundle' as 'Bundle'
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'colord[3]' as 'Color3d' and array 'Color3dArray
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'colorf[3]' as 'Color3f' and array 'Color3fArray
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'colorh[3]' as 'Color3h' and array 'Color3hArray
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'colord[4]' as 'Color4d' and array 'Color4dArray
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'colorf[4]' as 'Color4f' and array 'Color4fArray
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'colorh[4]' as 'Color4h' and array 'Color4hArray
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'double' as 'Double' and array 'DoubleArray
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'double[2]' as 'Double2' and array 'Double2Array
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'double[3]' as 'Double3' and array 'Double3Array
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'double[4]' as 'Double4' and array 'Double4Array
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'execution' as 'Execution'
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'float' as 'Float' and array 'FloatArray
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'float[2]' as 'Float2' and array 'Float2Array
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'float[3]' as 'Float3' and array 'Float3Array
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'float[4]' as 'Float4' and array 'Float4Array
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'frame[4]' as 'Frame' and array 'FrameArray
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'half' as 'Half' and array 'HalfArray
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'half[2]' as 'Half2' and array 'Half2Array
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'half[3]' as 'Half3' and array 'Half3Array
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'half[4]' as 'Half4' and array 'Half4Array
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'int' as 'Int' and array 'IntArray
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'int[2]' as 'Int2' and array 'Int2Array
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'int[3]' as 'Int3' and array 'Int3Array
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'int[4]' as 'Int4' and array 'Int4Array
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'int64' as 'Int64' and array 'Int64Array
+[2025-07-24 20:43:11,620][AutoNode][DEBUG] - Defining data type 'matrixd[2]' as 'Matrix2d' and array 'Matrix2dArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'matrixd[3]' as 'Matrix3d' and array 'Matrix3dArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'matrixd[4]' as 'Matrix4d' and array 'Matrix4dArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'normald[3]' as 'Normal3d' and array 'Normal3dArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'normalf[3]' as 'Normal3f' and array 'Normal3fArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'normalh[3]' as 'Normal3h' and array 'Normal3hArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'objectId' as 'ObjectId' and array 'ObjectIdArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'path' as 'Path'
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'pointd[3]' as 'Point3d' and array 'Point3dArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'pointf[3]' as 'Point3f' and array 'Point3fArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'pointh[3]' as 'Point3h' and array 'Point3hArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'quatd[4]' as 'Quatd' and array 'QuatdArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'quatf[4]' as 'Quatf' and array 'QuatfArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'quath[4]' as 'Quath' and array 'QuathArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'string' as 'String'
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'target' as 'Target'
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'texcoordd[2]' as 'TexCoord2d' and array 'TexCoord2dArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'texcoordf[2]' as 'TexCoord2f' and array 'TexCoord2fArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'texcoordh[2]' as 'TexCoord2h' and array 'TexCoord2hArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'texcoordd[3]' as 'TexCoord3d' and array 'TexCoord3dArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'texcoordf[3]' as 'TexCoord3f' and array 'TexCoord3fArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'texcoordh[3]' as 'TexCoord3h' and array 'TexCoord3hArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'timecode' as 'Timecode' and array 'TimecodeArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'token' as 'Token' and array 'TokenArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'uchar' as 'UChar' and array 'UCharArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'uint' as 'UInt' and array 'UIntArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'uint64' as 'UInt64' and array 'UInt64Array
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'vectord[3]' as 'Vector3d' and array 'Vector3dArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'vectorf[3]' as 'Vector3f' and array 'Vector3fArray
+[2025-07-24 20:43:11,621][AutoNode][DEBUG] - Defining data type 'vectorh[3]' as 'Vector3h' and array 'Vector3hArray
+[2025-07-24 20:43:12,901][trimesh][DEBUG] - falling back to hashlib hashing: `pip install xxhash`for 50x faster cache checks
+[2025-07-24 20:43:13,134][h5py._conv][DEBUG] - Creating converter from 7 to 5
+[2025-07-24 20:43:13,134][h5py._conv][DEBUG] - Creating converter from 5 to 7
+[2025-07-24 20:43:13,134][h5py._conv][DEBUG] - Creating converter from 7 to 5
+[2025-07-24 20:43:13,134][h5py._conv][DEBUG] - Creating converter from 5 to 7
+[2025-07-24 20:43:13,178][matplotlib][DEBUG] - matplotlib data path: /home/btabia/anaconda3/envs/pulse/lib/python3.10/site-packages/matplotlib/mpl-data
+[2025-07-24 20:43:13,181][matplotlib][DEBUG] - CONFIGDIR=/home/btabia/.config/matplotlib
+[2025-07-24 20:43:13,182][matplotlib][DEBUG] - interactive is False
+[2025-07-24 20:43:13,182][matplotlib][DEBUG] - platform is linux
+[2025-07-24 20:43:15,606][matplotlib][DEBUG] - CACHEDIR=/home/btabia/.cache/matplotlib
+[2025-07-24 20:43:15,607][matplotlib.font_manager][DEBUG] - Using fontManager instance from /home/btabia/.cache/matplotlib/fontlist-v390.json
+[2025-07-24 20:43:27,786][skrl][INFO] - Environment wrapper: Isaac Lab (single-agent)
+[2025-07-24 20:43:27,792][git.util][DEBUG] - sys.platform='linux', git_executable='git'
+[2025-07-24 20:43:27,792][git.cmd][DEBUG] - Popen(['git', 'rev-parse', '--show-toplevel'], cwd=/home/btabia/git/pulse, stdin=None, shell=False, universal_newlines=False)
+[2025-07-24 20:43:27,799][urllib3.connectionpool][DEBUG] - Starting new HTTPS connection (1): api.wandb.ai:443
+[2025-07-24 20:43:27,978][urllib3.connectionpool][DEBUG] - https://api.wandb.ai:443 "POST /graphql HTTP/1.1" 200 None
+[2025-07-24 20:43:28,097][urllib3.connectionpool][DEBUG] - https://api.wandb.ai:443 "POST /graphql HTTP/1.1" 200 None
+[2025-07-24 20:43:28,312][urllib3.connectionpool][DEBUG] - Starting new HTTPS connection (1): o151352.ingest.sentry.io:443
+[2025-07-24 20:43:28,462][urllib3.connectionpool][DEBUG] - https://o151352.ingest.sentry.io:443 "POST /api/4504800232407040/envelope/ HTTP/1.1" 200 0
+[2025-07-24 20:46:37,665][asyncio][DEBUG] - Using selector: EpollSelector
+[2025-07-24 20:46:39,340][AutoNode][DEBUG] - Defining data type 'any' as 'Any'
+[2025-07-24 20:46:39,340][AutoNode][DEBUG] - Defining data type 'bool' as 'Bool' and array 'BoolArray
+[2025-07-24 20:46:39,340][AutoNode][DEBUG] - Defining data type 'bundle' as 'Bundle'
+[2025-07-24 20:46:39,340][AutoNode][DEBUG] - Defining data type 'colord[3]' as 'Color3d' and array 'Color3dArray
+[2025-07-24 20:46:39,340][AutoNode][DEBUG] - Defining data type 'colorf[3]' as 'Color3f' and array 'Color3fArray
+[2025-07-24 20:46:39,340][AutoNode][DEBUG] - Defining data type 'colorh[3]' as 'Color3h' and array 'Color3hArray
+[2025-07-24 20:46:39,340][AutoNode][DEBUG] - Defining data type 'colord[4]' as 'Color4d' and array 'Color4dArray
+[2025-07-24 20:46:39,340][AutoNode][DEBUG] - Defining data type 'colorf[4]' as 'Color4f' and array 'Color4fArray
+[2025-07-24 20:46:39,340][AutoNode][DEBUG] - Defining data type 'colorh[4]' as 'Color4h' and array 'Color4hArray
+[2025-07-24 20:46:39,340][AutoNode][DEBUG] - Defining data type 'double' as 'Double' and array 'DoubleArray
+[2025-07-24 20:46:39,340][AutoNode][DEBUG] - Defining data type 'double[2]' as 'Double2' and array 'Double2Array
+[2025-07-24 20:46:39,340][AutoNode][DEBUG] - Defining data type 'double[3]' as 'Double3' and array 'Double3Array
+[2025-07-24 20:46:39,340][AutoNode][DEBUG] - Defining data type 'double[4]' as 'Double4' and array 'Double4Array
+[2025-07-24 20:46:39,340][AutoNode][DEBUG] - Defining data type 'execution' as 'Execution'
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'float' as 'Float' and array 'FloatArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'float[2]' as 'Float2' and array 'Float2Array
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'float[3]' as 'Float3' and array 'Float3Array
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'float[4]' as 'Float4' and array 'Float4Array
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'frame[4]' as 'Frame' and array 'FrameArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'half' as 'Half' and array 'HalfArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'half[2]' as 'Half2' and array 'Half2Array
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'half[3]' as 'Half3' and array 'Half3Array
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'half[4]' as 'Half4' and array 'Half4Array
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'int' as 'Int' and array 'IntArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'int[2]' as 'Int2' and array 'Int2Array
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'int[3]' as 'Int3' and array 'Int3Array
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'int[4]' as 'Int4' and array 'Int4Array
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'int64' as 'Int64' and array 'Int64Array
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'matrixd[2]' as 'Matrix2d' and array 'Matrix2dArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'matrixd[3]' as 'Matrix3d' and array 'Matrix3dArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'matrixd[4]' as 'Matrix4d' and array 'Matrix4dArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'normald[3]' as 'Normal3d' and array 'Normal3dArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'normalf[3]' as 'Normal3f' and array 'Normal3fArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'normalh[3]' as 'Normal3h' and array 'Normal3hArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'objectId' as 'ObjectId' and array 'ObjectIdArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'path' as 'Path'
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'pointd[3]' as 'Point3d' and array 'Point3dArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'pointf[3]' as 'Point3f' and array 'Point3fArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'pointh[3]' as 'Point3h' and array 'Point3hArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'quatd[4]' as 'Quatd' and array 'QuatdArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'quatf[4]' as 'Quatf' and array 'QuatfArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'quath[4]' as 'Quath' and array 'QuathArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'string' as 'String'
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'target' as 'Target'
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'texcoordd[2]' as 'TexCoord2d' and array 'TexCoord2dArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'texcoordf[2]' as 'TexCoord2f' and array 'TexCoord2fArray
+[2025-07-24 20:46:39,341][AutoNode][DEBUG] - Defining data type 'texcoordh[2]' as 'TexCoord2h' and array 'TexCoord2hArray
+[2025-07-24 20:46:39,342][AutoNode][DEBUG] - Defining data type 'texcoordd[3]' as 'TexCoord3d' and array 'TexCoord3dArray
+[2025-07-24 20:46:39,342][AutoNode][DEBUG] - Defining data type 'texcoordf[3]' as 'TexCoord3f' and array 'TexCoord3fArray
+[2025-07-24 20:46:39,342][AutoNode][DEBUG] - Defining data type 'texcoordh[3]' as 'TexCoord3h' and array 'TexCoord3hArray
+[2025-07-24 20:46:39,342][AutoNode][DEBUG] - Defining data type 'timecode' as 'Timecode' and array 'TimecodeArray
+[2025-07-24 20:46:39,342][AutoNode][DEBUG] - Defining data type 'token' as 'Token' and array 'TokenArray
+[2025-07-24 20:46:39,342][AutoNode][DEBUG] - Defining data type 'uchar' as 'UChar' and array 'UCharArray
+[2025-07-24 20:46:39,342][AutoNode][DEBUG] - Defining data type 'uint' as 'UInt' and array 'UIntArray
+[2025-07-24 20:46:39,342][AutoNode][DEBUG] - Defining data type 'uint64' as 'UInt64' and array 'UInt64Array
+[2025-07-24 20:46:39,342][AutoNode][DEBUG] - Defining data type 'vectord[3]' as 'Vector3d' and array 'Vector3dArray
+[2025-07-24 20:46:39,342][AutoNode][DEBUG] - Defining data type 'vectorf[3]' as 'Vector3f' and array 'Vector3fArray
+[2025-07-24 20:46:39,342][AutoNode][DEBUG] - Defining data type 'vectorh[3]' as 'Vector3h' and array 'Vector3hArray
+[2025-07-24 20:46:40,598][trimesh][DEBUG] - falling back to hashlib hashing: `pip install xxhash`for 50x faster cache checks
+[2025-07-24 20:46:40,833][h5py._conv][DEBUG] - Creating converter from 7 to 5
+[2025-07-24 20:46:40,833][h5py._conv][DEBUG] - Creating converter from 5 to 7
+[2025-07-24 20:46:40,833][h5py._conv][DEBUG] - Creating converter from 7 to 5
+[2025-07-24 20:46:40,833][h5py._conv][DEBUG] - Creating converter from 5 to 7
+[2025-07-24 20:46:40,877][matplotlib][DEBUG] - matplotlib data path: /home/btabia/anaconda3/envs/pulse/lib/python3.10/site-packages/matplotlib/mpl-data
+[2025-07-24 20:46:40,881][matplotlib][DEBUG] - CONFIGDIR=/home/btabia/.config/matplotlib
+[2025-07-24 20:46:40,881][matplotlib][DEBUG] - interactive is False
+[2025-07-24 20:46:40,881][matplotlib][DEBUG] - platform is linux
+[2025-07-24 20:46:43,332][matplotlib][DEBUG] - CACHEDIR=/home/btabia/.cache/matplotlib
+[2025-07-24 20:46:43,333][matplotlib.font_manager][DEBUG] - Using fontManager instance from /home/btabia/.cache/matplotlib/fontlist-v390.json
+[2025-07-24 20:46:50,362][skrl][INFO] - Environment wrapper: Isaac Lab (single-agent)
+[2025-07-24 20:46:50,367][git.util][DEBUG] - sys.platform='linux', git_executable='git'
+[2025-07-24 20:46:50,367][git.cmd][DEBUG] - Popen(['git', 'rev-parse', '--show-toplevel'], cwd=/home/btabia/git/pulse, stdin=None, shell=False, universal_newlines=False)
+[2025-07-24 20:46:50,374][urllib3.connectionpool][DEBUG] - Starting new HTTPS connection (1): api.wandb.ai:443
+[2025-07-24 20:46:50,551][urllib3.connectionpool][DEBUG] - https://api.wandb.ai:443 "POST /graphql HTTP/1.1" 200 None
+[2025-07-24 20:46:50,696][urllib3.connectionpool][DEBUG] - https://api.wandb.ai:443 "POST /graphql HTTP/1.1" 200 None
+[2025-07-24 20:46:50,910][urllib3.connectionpool][DEBUG] - Starting new HTTPS connection (1): o151352.ingest.sentry.io:443
+[2025-07-24 20:46:51,025][urllib3.connectionpool][DEBUG] - https://o151352.ingest.sentry.io:443 "POST /api/4504800232407040/envelope/ HTTP/1.1" 200 0
+[2025-07-24 20:55:57,061][asyncio][DEBUG] - Using selector: EpollSelector
+[2025-07-24 20:55:58,780][AutoNode][DEBUG] - Defining data type 'any' as 'Any'
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'bool' as 'Bool' and array 'BoolArray
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'bundle' as 'Bundle'
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'colord[3]' as 'Color3d' and array 'Color3dArray
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'colorf[3]' as 'Color3f' and array 'Color3fArray
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'colorh[3]' as 'Color3h' and array 'Color3hArray
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'colord[4]' as 'Color4d' and array 'Color4dArray
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'colorf[4]' as 'Color4f' and array 'Color4fArray
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'colorh[4]' as 'Color4h' and array 'Color4hArray
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'double' as 'Double' and array 'DoubleArray
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'double[2]' as 'Double2' and array 'Double2Array
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'double[3]' as 'Double3' and array 'Double3Array
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'double[4]' as 'Double4' and array 'Double4Array
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'execution' as 'Execution'
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'float' as 'Float' and array 'FloatArray
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'float[2]' as 'Float2' and array 'Float2Array
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'float[3]' as 'Float3' and array 'Float3Array
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'float[4]' as 'Float4' and array 'Float4Array
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'frame[4]' as 'Frame' and array 'FrameArray
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'half' as 'Half' and array 'HalfArray
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'half[2]' as 'Half2' and array 'Half2Array
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'half[3]' as 'Half3' and array 'Half3Array
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'half[4]' as 'Half4' and array 'Half4Array
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'int' as 'Int' and array 'IntArray
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'int[2]' as 'Int2' and array 'Int2Array
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'int[3]' as 'Int3' and array 'Int3Array
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'int[4]' as 'Int4' and array 'Int4Array
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'int64' as 'Int64' and array 'Int64Array
+[2025-07-24 20:55:58,781][AutoNode][DEBUG] - Defining data type 'matrixd[2]' as 'Matrix2d' and array 'Matrix2dArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'matrixd[3]' as 'Matrix3d' and array 'Matrix3dArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'matrixd[4]' as 'Matrix4d' and array 'Matrix4dArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'normald[3]' as 'Normal3d' and array 'Normal3dArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'normalf[3]' as 'Normal3f' and array 'Normal3fArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'normalh[3]' as 'Normal3h' and array 'Normal3hArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'objectId' as 'ObjectId' and array 'ObjectIdArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'path' as 'Path'
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'pointd[3]' as 'Point3d' and array 'Point3dArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'pointf[3]' as 'Point3f' and array 'Point3fArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'pointh[3]' as 'Point3h' and array 'Point3hArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'quatd[4]' as 'Quatd' and array 'QuatdArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'quatf[4]' as 'Quatf' and array 'QuatfArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'quath[4]' as 'Quath' and array 'QuathArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'string' as 'String'
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'target' as 'Target'
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'texcoordd[2]' as 'TexCoord2d' and array 'TexCoord2dArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'texcoordf[2]' as 'TexCoord2f' and array 'TexCoord2fArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'texcoordh[2]' as 'TexCoord2h' and array 'TexCoord2hArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'texcoordd[3]' as 'TexCoord3d' and array 'TexCoord3dArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'texcoordf[3]' as 'TexCoord3f' and array 'TexCoord3fArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'texcoordh[3]' as 'TexCoord3h' and array 'TexCoord3hArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'timecode' as 'Timecode' and array 'TimecodeArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'token' as 'Token' and array 'TokenArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'uchar' as 'UChar' and array 'UCharArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'uint' as 'UInt' and array 'UIntArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'uint64' as 'UInt64' and array 'UInt64Array
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'vectord[3]' as 'Vector3d' and array 'Vector3dArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'vectorf[3]' as 'Vector3f' and array 'Vector3fArray
+[2025-07-24 20:55:58,782][AutoNode][DEBUG] - Defining data type 'vectorh[3]' as 'Vector3h' and array 'Vector3hArray
+[2025-07-24 20:56:00,060][trimesh][DEBUG] - falling back to hashlib hashing: `pip install xxhash`for 50x faster cache checks
+[2025-07-24 20:56:00,293][h5py._conv][DEBUG] - Creating converter from 7 to 5
+[2025-07-24 20:56:00,293][h5py._conv][DEBUG] - Creating converter from 5 to 7
+[2025-07-24 20:56:00,293][h5py._conv][DEBUG] - Creating converter from 7 to 5
+[2025-07-24 20:56:00,293][h5py._conv][DEBUG] - Creating converter from 5 to 7
+[2025-07-24 20:56:00,337][matplotlib][DEBUG] - matplotlib data path: /home/btabia/anaconda3/envs/pulse/lib/python3.10/site-packages/matplotlib/mpl-data
+[2025-07-24 20:56:00,341][matplotlib][DEBUG] - CONFIGDIR=/home/btabia/.config/matplotlib
+[2025-07-24 20:56:00,341][matplotlib][DEBUG] - interactive is False
+[2025-07-24 20:56:00,342][matplotlib][DEBUG] - platform is linux
+[2025-07-24 20:56:02,771][matplotlib][DEBUG] - CACHEDIR=/home/btabia/.cache/matplotlib
+[2025-07-24 20:56:02,772][matplotlib.font_manager][DEBUG] - Using fontManager instance from /home/btabia/.cache/matplotlib/fontlist-v390.json
+[2025-07-24 20:56:10,062][skrl][INFO] - Environment wrapper: Isaac Lab (single-agent)
+[2025-07-24 20:56:10,067][git.util][DEBUG] - sys.platform='linux', git_executable='git'
+[2025-07-24 20:56:10,068][git.cmd][DEBUG] - Popen(['git', 'rev-parse', '--show-toplevel'], cwd=/home/btabia/git/pulse, stdin=None, shell=False, universal_newlines=False)
+[2025-07-24 20:56:10,074][urllib3.connectionpool][DEBUG] - Starting new HTTPS connection (1): api.wandb.ai:443
+[2025-07-24 20:56:10,332][urllib3.connectionpool][DEBUG] - https://api.wandb.ai:443 "POST /graphql HTTP/1.1" 200 None
+[2025-07-24 20:56:10,453][urllib3.connectionpool][DEBUG] - https://api.wandb.ai:443 "POST /graphql HTTP/1.1" 200 None
+[2025-07-24 20:56:10,666][git.util][DEBUG] - sys.platform='linux', git_executable='git'
+[2025-07-24 20:56:10,667][git.cmd][DEBUG] - Popen(['git', 'cat-file', '--batch-check'], cwd=/home/btabia/git/pulse, stdin=<valid stream>, shell=False, universal_newlines=False)
+[2025-07-24 20:56:14,270][skrl][INFO] - Closing environment
+[2025-07-24 20:56:14,982][skrl][INFO] - Environment closed
+[2025-07-24 21:12:19,676][asyncio][DEBUG] - Using selector: EpollSelector
+[2025-07-24 21:12:21,381][AutoNode][DEBUG] - Defining data type 'any' as 'Any'
+[2025-07-24 21:12:21,381][AutoNode][DEBUG] - Defining data type 'bool' as 'Bool' and array 'BoolArray
+[2025-07-24 21:12:21,381][AutoNode][DEBUG] - Defining data type 'bundle' as 'Bundle'
+[2025-07-24 21:12:21,381][AutoNode][DEBUG] - Defining data type 'colord[3]' as 'Color3d' and array 'Color3dArray
+[2025-07-24 21:12:21,381][AutoNode][DEBUG] - Defining data type 'colorf[3]' as 'Color3f' and array 'Color3fArray
+[2025-07-24 21:12:21,381][AutoNode][DEBUG] - Defining data type 'colorh[3]' as 'Color3h' and array 'Color3hArray
+[2025-07-24 21:12:21,381][AutoNode][DEBUG] - Defining data type 'colord[4]' as 'Color4d' and array 'Color4dArray
+[2025-07-24 21:12:21,381][AutoNode][DEBUG] - Defining data type 'colorf[4]' as 'Color4f' and array 'Color4fArray
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'colorh[4]' as 'Color4h' and array 'Color4hArray
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'double' as 'Double' and array 'DoubleArray
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'double[2]' as 'Double2' and array 'Double2Array
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'double[3]' as 'Double3' and array 'Double3Array
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'double[4]' as 'Double4' and array 'Double4Array
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'execution' as 'Execution'
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'float' as 'Float' and array 'FloatArray
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'float[2]' as 'Float2' and array 'Float2Array
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'float[3]' as 'Float3' and array 'Float3Array
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'float[4]' as 'Float4' and array 'Float4Array
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'frame[4]' as 'Frame' and array 'FrameArray
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'half' as 'Half' and array 'HalfArray
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'half[2]' as 'Half2' and array 'Half2Array
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'half[3]' as 'Half3' and array 'Half3Array
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'half[4]' as 'Half4' and array 'Half4Array
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'int' as 'Int' and array 'IntArray
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'int[2]' as 'Int2' and array 'Int2Array
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'int[3]' as 'Int3' and array 'Int3Array
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'int[4]' as 'Int4' and array 'Int4Array
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'int64' as 'Int64' and array 'Int64Array
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'matrixd[2]' as 'Matrix2d' and array 'Matrix2dArray
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'matrixd[3]' as 'Matrix3d' and array 'Matrix3dArray
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'matrixd[4]' as 'Matrix4d' and array 'Matrix4dArray
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'normald[3]' as 'Normal3d' and array 'Normal3dArray
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'normalf[3]' as 'Normal3f' and array 'Normal3fArray
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'normalh[3]' as 'Normal3h' and array 'Normal3hArray
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'objectId' as 'ObjectId' and array 'ObjectIdArray
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'path' as 'Path'
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'pointd[3]' as 'Point3d' and array 'Point3dArray
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'pointf[3]' as 'Point3f' and array 'Point3fArray
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'pointh[3]' as 'Point3h' and array 'Point3hArray
+[2025-07-24 21:12:21,382][AutoNode][DEBUG] - Defining data type 'quatd[4]' as 'Quatd' and array 'QuatdArray
+[2025-07-24 21:12:21,383][AutoNode][DEBUG] - Defining data type 'quatf[4]' as 'Quatf' and array 'QuatfArray
+[2025-07-24 21:12:21,383][AutoNode][DEBUG] - Defining data type 'quath[4]' as 'Quath' and array 'QuathArray
+[2025-07-24 21:12:21,383][AutoNode][DEBUG] - Defining data type 'string' as 'String'
+[2025-07-24 21:12:21,383][AutoNode][DEBUG] - Defining data type 'target' as 'Target'
+[2025-07-24 21:12:21,383][AutoNode][DEBUG] - Defining data type 'texcoordd[2]' as 'TexCoord2d' and array 'TexCoord2dArray
+[2025-07-24 21:12:21,383][AutoNode][DEBUG] - Defining data type 'texcoordf[2]' as 'TexCoord2f' and array 'TexCoord2fArray
+[2025-07-24 21:12:21,383][AutoNode][DEBUG] - Defining data type 'texcoordh[2]' as 'TexCoord2h' and array 'TexCoord2hArray
+[2025-07-24 21:12:21,383][AutoNode][DEBUG] - Defining data type 'texcoordd[3]' as 'TexCoord3d' and array 'TexCoord3dArray
+[2025-07-24 21:12:21,383][AutoNode][DEBUG] - Defining data type 'texcoordf[3]' as 'TexCoord3f' and array 'TexCoord3fArray
+[2025-07-24 21:12:21,383][AutoNode][DEBUG] - Defining data type 'texcoordh[3]' as 'TexCoord3h' and array 'TexCoord3hArray
+[2025-07-24 21:12:21,383][AutoNode][DEBUG] - Defining data type 'timecode' as 'Timecode' and array 'TimecodeArray
+[2025-07-24 21:12:21,383][AutoNode][DEBUG] - Defining data type 'token' as 'Token' and array 'TokenArray
+[2025-07-24 21:12:21,383][AutoNode][DEBUG] - Defining data type 'uchar' as 'UChar' and array 'UCharArray
+[2025-07-24 21:12:21,383][AutoNode][DEBUG] - Defining data type 'uint' as 'UInt' and array 'UIntArray
+[2025-07-24 21:12:21,383][AutoNode][DEBUG] - Defining data type 'uint64' as 'UInt64' and array 'UInt64Array
+[2025-07-24 21:12:21,383][AutoNode][DEBUG] - Defining data type 'vectord[3]' as 'Vector3d' and array 'Vector3dArray
+[2025-07-24 21:12:21,383][AutoNode][DEBUG] - Defining data type 'vectorf[3]' as 'Vector3f' and array 'Vector3fArray
+[2025-07-24 21:12:21,383][AutoNode][DEBUG] - Defining data type 'vectorh[3]' as 'Vector3h' and array 'Vector3hArray
+[2025-07-24 21:12:22,667][trimesh][DEBUG] - falling back to hashlib hashing: `pip install xxhash`for 50x faster cache checks
+[2025-07-24 21:12:22,903][h5py._conv][DEBUG] - Creating converter from 7 to 5
+[2025-07-24 21:12:22,903][h5py._conv][DEBUG] - Creating converter from 5 to 7
+[2025-07-24 21:12:22,903][h5py._conv][DEBUG] - Creating converter from 7 to 5
+[2025-07-24 21:12:22,904][h5py._conv][DEBUG] - Creating converter from 5 to 7
+[2025-07-24 21:12:22,948][matplotlib][DEBUG] - matplotlib data path: /home/btabia/anaconda3/envs/pulse/lib/python3.10/site-packages/matplotlib/mpl-data
+[2025-07-24 21:12:22,951][matplotlib][DEBUG] - CONFIGDIR=/home/btabia/.config/matplotlib
+[2025-07-24 21:12:22,952][matplotlib][DEBUG] - interactive is False
+[2025-07-24 21:12:22,952][matplotlib][DEBUG] - platform is linux
+[2025-07-24 21:12:25,425][matplotlib][DEBUG] - CACHEDIR=/home/btabia/.cache/matplotlib
+[2025-07-24 21:12:25,426][matplotlib.font_manager][DEBUG] - Using fontManager instance from /home/btabia/.cache/matplotlib/fontlist-v390.json
+[2025-07-24 21:12:32,749][skrl][INFO] - Environment wrapper: Isaac Lab (single-agent)
+[2025-07-24 21:12:32,754][git.util][DEBUG] - sys.platform='linux', git_executable='git'
+[2025-07-24 21:12:32,755][git.cmd][DEBUG] - Popen(['git', 'rev-parse', '--show-toplevel'], cwd=/home/btabia/git/pulse, stdin=None, shell=False, universal_newlines=False)
+[2025-07-24 21:12:32,762][urllib3.connectionpool][DEBUG] - Starting new HTTPS connection (1): api.wandb.ai:443
+[2025-07-24 21:12:32,936][urllib3.connectionpool][DEBUG] - https://api.wandb.ai:443 "POST /graphql HTTP/1.1" 200 None
+[2025-07-24 21:12:33,078][urllib3.connectionpool][DEBUG] - https://api.wandb.ai:443 "POST /graphql HTTP/1.1" 200 None
+[2025-07-24 21:12:33,291][git.util][DEBUG] - sys.platform='linux', git_executable='git'
+[2025-07-24 21:12:33,292][git.cmd][DEBUG] - Popen(['git', 'cat-file', '--batch-check'], cwd=/home/btabia/git/pulse, stdin=<valid stream>, shell=False, universal_newlines=False)
+[2025-07-24 21:14:59,924][asyncio][DEBUG] - Using selector: EpollSelector
+[2025-07-24 21:15:01,576][AutoNode][DEBUG] - Defining data type 'any' as 'Any'
+[2025-07-24 21:15:01,576][AutoNode][DEBUG] - Defining data type 'bool' as 'Bool' and array 'BoolArray
+[2025-07-24 21:15:01,576][AutoNode][DEBUG] - Defining data type 'bundle' as 'Bundle'
+[2025-07-24 21:15:01,576][AutoNode][DEBUG] - Defining data type 'colord[3]' as 'Color3d' and array 'Color3dArray
+[2025-07-24 21:15:01,576][AutoNode][DEBUG] - Defining data type 'colorf[3]' as 'Color3f' and array 'Color3fArray
+[2025-07-24 21:15:01,576][AutoNode][DEBUG] - Defining data type 'colorh[3]' as 'Color3h' and array 'Color3hArray
+[2025-07-24 21:15:01,576][AutoNode][DEBUG] - Defining data type 'colord[4]' as 'Color4d' and array 'Color4dArray
+[2025-07-24 21:15:01,576][AutoNode][DEBUG] - Defining data type 'colorf[4]' as 'Color4f' and array 'Color4fArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'colorh[4]' as 'Color4h' and array 'Color4hArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'double' as 'Double' and array 'DoubleArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'double[2]' as 'Double2' and array 'Double2Array
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'double[3]' as 'Double3' and array 'Double3Array
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'double[4]' as 'Double4' and array 'Double4Array
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'execution' as 'Execution'
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'float' as 'Float' and array 'FloatArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'float[2]' as 'Float2' and array 'Float2Array
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'float[3]' as 'Float3' and array 'Float3Array
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'float[4]' as 'Float4' and array 'Float4Array
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'frame[4]' as 'Frame' and array 'FrameArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'half' as 'Half' and array 'HalfArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'half[2]' as 'Half2' and array 'Half2Array
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'half[3]' as 'Half3' and array 'Half3Array
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'half[4]' as 'Half4' and array 'Half4Array
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'int' as 'Int' and array 'IntArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'int[2]' as 'Int2' and array 'Int2Array
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'int[3]' as 'Int3' and array 'Int3Array
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'int[4]' as 'Int4' and array 'Int4Array
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'int64' as 'Int64' and array 'Int64Array
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'matrixd[2]' as 'Matrix2d' and array 'Matrix2dArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'matrixd[3]' as 'Matrix3d' and array 'Matrix3dArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'matrixd[4]' as 'Matrix4d' and array 'Matrix4dArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'normald[3]' as 'Normal3d' and array 'Normal3dArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'normalf[3]' as 'Normal3f' and array 'Normal3fArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'normalh[3]' as 'Normal3h' and array 'Normal3hArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'objectId' as 'ObjectId' and array 'ObjectIdArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'path' as 'Path'
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'pointd[3]' as 'Point3d' and array 'Point3dArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'pointf[3]' as 'Point3f' and array 'Point3fArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'pointh[3]' as 'Point3h' and array 'Point3hArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'quatd[4]' as 'Quatd' and array 'QuatdArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'quatf[4]' as 'Quatf' and array 'QuatfArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'quath[4]' as 'Quath' and array 'QuathArray
+[2025-07-24 21:15:01,577][AutoNode][DEBUG] - Defining data type 'string' as 'String'
+[2025-07-24 21:15:01,578][AutoNode][DEBUG] - Defining data type 'target' as 'Target'
+[2025-07-24 21:15:01,578][AutoNode][DEBUG] - Defining data type 'texcoordd[2]' as 'TexCoord2d' and array 'TexCoord2dArray
+[2025-07-24 21:15:01,578][AutoNode][DEBUG] - Defining data type 'texcoordf[2]' as 'TexCoord2f' and array 'TexCoord2fArray
+[2025-07-24 21:15:01,578][AutoNode][DEBUG] - Defining data type 'texcoordh[2]' as 'TexCoord2h' and array 'TexCoord2hArray
+[2025-07-24 21:15:01,578][AutoNode][DEBUG] - Defining data type 'texcoordd[3]' as 'TexCoord3d' and array 'TexCoord3dArray
+[2025-07-24 21:15:01,578][AutoNode][DEBUG] - Defining data type 'texcoordf[3]' as 'TexCoord3f' and array 'TexCoord3fArray
+[2025-07-24 21:15:01,578][AutoNode][DEBUG] - Defining data type 'texcoordh[3]' as 'TexCoord3h' and array 'TexCoord3hArray
+[2025-07-24 21:15:01,578][AutoNode][DEBUG] - Defining data type 'timecode' as 'Timecode' and array 'TimecodeArray
+[2025-07-24 21:15:01,578][AutoNode][DEBUG] - Defining data type 'token' as 'Token' and array 'TokenArray
+[2025-07-24 21:15:01,578][AutoNode][DEBUG] - Defining data type 'uchar' as 'UChar' and array 'UCharArray
+[2025-07-24 21:15:01,578][AutoNode][DEBUG] - Defining data type 'uint' as 'UInt' and array 'UIntArray
+[2025-07-24 21:15:01,578][AutoNode][DEBUG] - Defining data type 'uint64' as 'UInt64' and array 'UInt64Array
+[2025-07-24 21:15:01,578][AutoNode][DEBUG] - Defining data type 'vectord[3]' as 'Vector3d' and array 'Vector3dArray
+[2025-07-24 21:15:01,578][AutoNode][DEBUG] - Defining data type 'vectorf[3]' as 'Vector3f' and array 'Vector3fArray
+[2025-07-24 21:15:01,578][AutoNode][DEBUG] - Defining data type 'vectorh[3]' as 'Vector3h' and array 'Vector3hArray
+[2025-07-24 21:15:02,857][trimesh][DEBUG] - falling back to hashlib hashing: `pip install xxhash`for 50x faster cache checks
+[2025-07-24 21:15:03,092][h5py._conv][DEBUG] - Creating converter from 7 to 5
+[2025-07-24 21:15:03,092][h5py._conv][DEBUG] - Creating converter from 5 to 7
+[2025-07-24 21:15:03,092][h5py._conv][DEBUG] - Creating converter from 7 to 5
+[2025-07-24 21:15:03,092][h5py._conv][DEBUG] - Creating converter from 5 to 7
+[2025-07-24 21:15:03,137][matplotlib][DEBUG] - matplotlib data path: /home/btabia/anaconda3/envs/pulse/lib/python3.10/site-packages/matplotlib/mpl-data
+[2025-07-24 21:15:03,140][matplotlib][DEBUG] - CONFIGDIR=/home/btabia/.config/matplotlib
+[2025-07-24 21:15:03,141][matplotlib][DEBUG] - interactive is False
+[2025-07-24 21:15:03,141][matplotlib][DEBUG] - platform is linux
+[2025-07-24 21:15:05,599][matplotlib][DEBUG] - CACHEDIR=/home/btabia/.cache/matplotlib
+[2025-07-24 21:15:05,601][matplotlib.font_manager][DEBUG] - Using fontManager instance from /home/btabia/.cache/matplotlib/fontlist-v390.json
+[2025-07-24 21:15:12,297][skrl][INFO] - Environment wrapper: Isaac Lab (single-agent)
+[2025-07-24 21:15:12,303][git.util][DEBUG] - sys.platform='linux', git_executable='git'
+[2025-07-24 21:15:12,303][git.cmd][DEBUG] - Popen(['git', 'rev-parse', '--show-toplevel'], cwd=/home/btabia/git/pulse, stdin=None, shell=False, universal_newlines=False)
+[2025-07-24 21:15:12,309][urllib3.connectionpool][DEBUG] - Starting new HTTPS connection (1): api.wandb.ai:443
+[2025-07-24 21:15:12,502][urllib3.connectionpool][DEBUG] - https://api.wandb.ai:443 "POST /graphql HTTP/1.1" 200 None
+[2025-07-24 21:15:12,631][urllib3.connectionpool][DEBUG] - https://api.wandb.ai:443 "POST /graphql HTTP/1.1" 200 None
+[2025-07-24 21:15:12,843][git.util][DEBUG] - sys.platform='linux', git_executable='git'
+[2025-07-24 21:15:12,844][git.cmd][DEBUG] - Popen(['git', 'cat-file', '--batch-check'], cwd=/home/btabia/git/pulse, stdin=<valid stream>, shell=False, universal_newlines=False)
+[2025-07-24 21:16:46,410][asyncio][DEBUG] - Using selector: EpollSelector
+[2025-07-24 21:16:48,075][AutoNode][DEBUG] - Defining data type 'any' as 'Any'
+[2025-07-24 21:16:48,075][AutoNode][DEBUG] - Defining data type 'bool' as 'Bool' and array 'BoolArray
+[2025-07-24 21:16:48,075][AutoNode][DEBUG] - Defining data type 'bundle' as 'Bundle'
+[2025-07-24 21:16:48,075][AutoNode][DEBUG] - Defining data type 'colord[3]' as 'Color3d' and array 'Color3dArray
+[2025-07-24 21:16:48,075][AutoNode][DEBUG] - Defining data type 'colorf[3]' as 'Color3f' and array 'Color3fArray
+[2025-07-24 21:16:48,075][AutoNode][DEBUG] - Defining data type 'colorh[3]' as 'Color3h' and array 'Color3hArray
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'colord[4]' as 'Color4d' and array 'Color4dArray
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'colorf[4]' as 'Color4f' and array 'Color4fArray
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'colorh[4]' as 'Color4h' and array 'Color4hArray
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'double' as 'Double' and array 'DoubleArray
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'double[2]' as 'Double2' and array 'Double2Array
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'double[3]' as 'Double3' and array 'Double3Array
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'double[4]' as 'Double4' and array 'Double4Array
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'execution' as 'Execution'
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'float' as 'Float' and array 'FloatArray
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'float[2]' as 'Float2' and array 'Float2Array
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'float[3]' as 'Float3' and array 'Float3Array
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'float[4]' as 'Float4' and array 'Float4Array
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'frame[4]' as 'Frame' and array 'FrameArray
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'half' as 'Half' and array 'HalfArray
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'half[2]' as 'Half2' and array 'Half2Array
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'half[3]' as 'Half3' and array 'Half3Array
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'half[4]' as 'Half4' and array 'Half4Array
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'int' as 'Int' and array 'IntArray
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'int[2]' as 'Int2' and array 'Int2Array
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'int[3]' as 'Int3' and array 'Int3Array
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'int[4]' as 'Int4' and array 'Int4Array
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'int64' as 'Int64' and array 'Int64Array
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'matrixd[2]' as 'Matrix2d' and array 'Matrix2dArray
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'matrixd[3]' as 'Matrix3d' and array 'Matrix3dArray
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'matrixd[4]' as 'Matrix4d' and array 'Matrix4dArray
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'normald[3]' as 'Normal3d' and array 'Normal3dArray
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'normalf[3]' as 'Normal3f' and array 'Normal3fArray
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'normalh[3]' as 'Normal3h' and array 'Normal3hArray
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'objectId' as 'ObjectId' and array 'ObjectIdArray
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'path' as 'Path'
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'pointd[3]' as 'Point3d' and array 'Point3dArray
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'pointf[3]' as 'Point3f' and array 'Point3fArray
+[2025-07-24 21:16:48,076][AutoNode][DEBUG] - Defining data type 'pointh[3]' as 'Point3h' and array 'Point3hArray
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'quatd[4]' as 'Quatd' and array 'QuatdArray
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'quatf[4]' as 'Quatf' and array 'QuatfArray
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'quath[4]' as 'Quath' and array 'QuathArray
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'string' as 'String'
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'target' as 'Target'
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'texcoordd[2]' as 'TexCoord2d' and array 'TexCoord2dArray
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'texcoordf[2]' as 'TexCoord2f' and array 'TexCoord2fArray
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'texcoordh[2]' as 'TexCoord2h' and array 'TexCoord2hArray
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'texcoordd[3]' as 'TexCoord3d' and array 'TexCoord3dArray
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'texcoordf[3]' as 'TexCoord3f' and array 'TexCoord3fArray
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'texcoordh[3]' as 'TexCoord3h' and array 'TexCoord3hArray
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'timecode' as 'Timecode' and array 'TimecodeArray
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'token' as 'Token' and array 'TokenArray
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'uchar' as 'UChar' and array 'UCharArray
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'uint' as 'UInt' and array 'UIntArray
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'uint64' as 'UInt64' and array 'UInt64Array
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'vectord[3]' as 'Vector3d' and array 'Vector3dArray
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'vectorf[3]' as 'Vector3f' and array 'Vector3fArray
+[2025-07-24 21:16:48,077][AutoNode][DEBUG] - Defining data type 'vectorh[3]' as 'Vector3h' and array 'Vector3hArray
+[2025-07-24 21:16:49,339][trimesh][DEBUG] - falling back to hashlib hashing: `pip install xxhash`for 50x faster cache checks
+[2025-07-24 21:16:49,573][h5py._conv][DEBUG] - Creating converter from 7 to 5
+[2025-07-24 21:16:49,573][h5py._conv][DEBUG] - Creating converter from 5 to 7
+[2025-07-24 21:16:49,573][h5py._conv][DEBUG] - Creating converter from 7 to 5
+[2025-07-24 21:16:49,573][h5py._conv][DEBUG] - Creating converter from 5 to 7
+[2025-07-24 21:16:49,617][matplotlib][DEBUG] - matplotlib data path: /home/btabia/anaconda3/envs/pulse/lib/python3.10/site-packages/matplotlib/mpl-data
+[2025-07-24 21:16:49,621][matplotlib][DEBUG] - CONFIGDIR=/home/btabia/.config/matplotlib
+[2025-07-24 21:16:49,622][matplotlib][DEBUG] - interactive is False
+[2025-07-24 21:16:49,622][matplotlib][DEBUG] - platform is linux
+[2025-07-24 21:16:51,969][matplotlib][DEBUG] - CACHEDIR=/home/btabia/.cache/matplotlib
+[2025-07-24 21:16:51,970][matplotlib.font_manager][DEBUG] - Using fontManager instance from /home/btabia/.cache/matplotlib/fontlist-v390.json
+[2025-07-24 21:16:58,945][skrl][INFO] - Environment wrapper: Isaac Lab (single-agent)
+[2025-07-24 21:17:50,338][asyncio][DEBUG] - Using selector: EpollSelector
+[2025-07-24 21:17:52,052][AutoNode][DEBUG] - Defining data type 'any' as 'Any'
+[2025-07-24 21:17:52,052][AutoNode][DEBUG] - Defining data type 'bool' as 'Bool' and array 'BoolArray
+[2025-07-24 21:17:52,052][AutoNode][DEBUG] - Defining data type 'bundle' as 'Bundle'
+[2025-07-24 21:17:52,052][AutoNode][DEBUG] - Defining data type 'colord[3]' as 'Color3d' and array 'Color3dArray
+[2025-07-24 21:17:52,052][AutoNode][DEBUG] - Defining data type 'colorf[3]' as 'Color3f' and array 'Color3fArray
+[2025-07-24 21:17:52,052][AutoNode][DEBUG] - Defining data type 'colorh[3]' as 'Color3h' and array 'Color3hArray
+[2025-07-24 21:17:52,052][AutoNode][DEBUG] - Defining data type 'colord[4]' as 'Color4d' and array 'Color4dArray
+[2025-07-24 21:17:52,052][AutoNode][DEBUG] - Defining data type 'colorf[4]' as 'Color4f' and array 'Color4fArray
+[2025-07-24 21:17:52,052][AutoNode][DEBUG] - Defining data type 'colorh[4]' as 'Color4h' and array 'Color4hArray
+[2025-07-24 21:17:52,052][AutoNode][DEBUG] - Defining data type 'double' as 'Double' and array 'DoubleArray
+[2025-07-24 21:17:52,052][AutoNode][DEBUG] - Defining data type 'double[2]' as 'Double2' and array 'Double2Array
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'double[3]' as 'Double3' and array 'Double3Array
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'double[4]' as 'Double4' and array 'Double4Array
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'execution' as 'Execution'
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'float' as 'Float' and array 'FloatArray
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'float[2]' as 'Float2' and array 'Float2Array
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'float[3]' as 'Float3' and array 'Float3Array
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'float[4]' as 'Float4' and array 'Float4Array
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'frame[4]' as 'Frame' and array 'FrameArray
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'half' as 'Half' and array 'HalfArray
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'half[2]' as 'Half2' and array 'Half2Array
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'half[3]' as 'Half3' and array 'Half3Array
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'half[4]' as 'Half4' and array 'Half4Array
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'int' as 'Int' and array 'IntArray
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'int[2]' as 'Int2' and array 'Int2Array
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'int[3]' as 'Int3' and array 'Int3Array
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'int[4]' as 'Int4' and array 'Int4Array
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'int64' as 'Int64' and array 'Int64Array
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'matrixd[2]' as 'Matrix2d' and array 'Matrix2dArray
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'matrixd[3]' as 'Matrix3d' and array 'Matrix3dArray
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'matrixd[4]' as 'Matrix4d' and array 'Matrix4dArray
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'normald[3]' as 'Normal3d' and array 'Normal3dArray
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'normalf[3]' as 'Normal3f' and array 'Normal3fArray
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'normalh[3]' as 'Normal3h' and array 'Normal3hArray
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'objectId' as 'ObjectId' and array 'ObjectIdArray
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'path' as 'Path'
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'pointd[3]' as 'Point3d' and array 'Point3dArray
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'pointf[3]' as 'Point3f' and array 'Point3fArray
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'pointh[3]' as 'Point3h' and array 'Point3hArray
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'quatd[4]' as 'Quatd' and array 'QuatdArray
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'quatf[4]' as 'Quatf' and array 'QuatfArray
+[2025-07-24 21:17:52,053][AutoNode][DEBUG] - Defining data type 'quath[4]' as 'Quath' and array 'QuathArray
+[2025-07-24 21:17:52,054][AutoNode][DEBUG] - Defining data type 'string' as 'String'
+[2025-07-24 21:17:52,054][AutoNode][DEBUG] - Defining data type 'target' as 'Target'
+[2025-07-24 21:17:52,054][AutoNode][DEBUG] - Defining data type 'texcoordd[2]' as 'TexCoord2d' and array 'TexCoord2dArray
+[2025-07-24 21:17:52,054][AutoNode][DEBUG] - Defining data type 'texcoordf[2]' as 'TexCoord2f' and array 'TexCoord2fArray
+[2025-07-24 21:17:52,054][AutoNode][DEBUG] - Defining data type 'texcoordh[2]' as 'TexCoord2h' and array 'TexCoord2hArray
+[2025-07-24 21:17:52,054][AutoNode][DEBUG] - Defining data type 'texcoordd[3]' as 'TexCoord3d' and array 'TexCoord3dArray
+[2025-07-24 21:17:52,054][AutoNode][DEBUG] - Defining data type 'texcoordf[3]' as 'TexCoord3f' and array 'TexCoord3fArray
+[2025-07-24 21:17:52,054][AutoNode][DEBUG] - Defining data type 'texcoordh[3]' as 'TexCoord3h' and array 'TexCoord3hArray
+[2025-07-24 21:17:52,054][AutoNode][DEBUG] - Defining data type 'timecode' as 'Timecode' and array 'TimecodeArray
+[2025-07-24 21:17:52,054][AutoNode][DEBUG] - Defining data type 'token' as 'Token' and array 'TokenArray
+[2025-07-24 21:17:52,054][AutoNode][DEBUG] - Defining data type 'uchar' as 'UChar' and array 'UCharArray
+[2025-07-24 21:17:52,054][AutoNode][DEBUG] - Defining data type 'uint' as 'UInt' and array 'UIntArray
+[2025-07-24 21:17:52,054][AutoNode][DEBUG] - Defining data type 'uint64' as 'UInt64' and array 'UInt64Array
+[2025-07-24 21:17:52,054][AutoNode][DEBUG] - Defining data type 'vectord[3]' as 'Vector3d' and array 'Vector3dArray
+[2025-07-24 21:17:52,054][AutoNode][DEBUG] - Defining data type 'vectorf[3]' as 'Vector3f' and array 'Vector3fArray
+[2025-07-24 21:17:52,054][AutoNode][DEBUG] - Defining data type 'vectorh[3]' as 'Vector3h' and array 'Vector3hArray
+[2025-07-24 21:17:53,325][trimesh][DEBUG] - falling back to hashlib hashing: `pip install xxhash`for 50x faster cache checks
+[2025-07-24 21:17:53,551][h5py._conv][DEBUG] - Creating converter from 7 to 5
+[2025-07-24 21:17:53,551][h5py._conv][DEBUG] - Creating converter from 5 to 7
+[2025-07-24 21:17:53,551][h5py._conv][DEBUG] - Creating converter from 7 to 5
+[2025-07-24 21:17:53,551][h5py._conv][DEBUG] - Creating converter from 5 to 7
+[2025-07-24 21:17:53,593][matplotlib][DEBUG] - matplotlib data path: /home/btabia/anaconda3/envs/pulse/lib/python3.10/site-packages/matplotlib/mpl-data
+[2025-07-24 21:17:53,597][matplotlib][DEBUG] - CONFIGDIR=/home/btabia/.config/matplotlib
+[2025-07-24 21:17:53,597][matplotlib][DEBUG] - interactive is False
+[2025-07-24 21:17:53,597][matplotlib][DEBUG] - platform is linux
+[2025-07-24 21:17:56,007][matplotlib][DEBUG] - CACHEDIR=/home/btabia/.cache/matplotlib
+[2025-07-24 21:17:56,009][matplotlib.font_manager][DEBUG] - Using fontManager instance from /home/btabia/.cache/matplotlib/fontlist-v390.json
+[2025-07-24 21:18:03,101][skrl][INFO] - Environment wrapper: Isaac Lab (single-agent)
+[2025-07-24 21:18:03,147][git.util][DEBUG] - sys.platform='linux', git_executable='git'
+[2025-07-24 21:18:03,148][git.cmd][DEBUG] - Popen(['git', 'rev-parse', '--show-toplevel'], cwd=/home/btabia/git/pulse, stdin=None, shell=False, universal_newlines=False)
+[2025-07-24 21:18:03,154][urllib3.connectionpool][DEBUG] - Starting new HTTPS connection (1): api.wandb.ai:443
+[2025-07-24 21:18:03,341][urllib3.connectionpool][DEBUG] - https://api.wandb.ai:443 "POST /graphql HTTP/1.1" 200 None
+[2025-07-24 21:18:03,470][urllib3.connectionpool][DEBUG] - https://api.wandb.ai:443 "POST /graphql HTTP/1.1" 200 None
+[2025-07-24 21:18:03,683][git.util][DEBUG] - sys.platform='linux', git_executable='git'
+[2025-07-24 21:18:03,684][git.cmd][DEBUG] - Popen(['git', 'cat-file', '--batch-check'], cwd=/home/btabia/git/pulse, stdin=<valid stream>, shell=False, universal_newlines=False)
+[2025-07-24 21:18:07,750][skrl][INFO] - Closing environment
+[2025-07-24 21:18:08,448][skrl][INFO] - Environment closed
