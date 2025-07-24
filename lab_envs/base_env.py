@@ -14,12 +14,6 @@ import numpy as np
 
 from isaaclab.envs import DirectRLEnv, DirectRLEnvCfg
 from lab_tasks.basetask import Basetask
-from lab_tasks.baseline_dengler import BaselineDengler
-from lab_tasks.admipush import AdmiPush
-from lab_tasks.admipush_2 import AdmiPush2
-from lab_tasks.admipush_vae import AdmiPushVAE
-from lab_tasks.admipush_cnn import AdmiPushCNN
-from lab_tasks.admipush_cnn_EE import AdmiPushCNNEE
 from lab_tasks.baseline_zhang import BaselineZhang
 from lab_tasks.gatpush import GatPush
 from typing import Any, ClassVar
@@ -30,22 +24,12 @@ from isaacsim.core.api.loggers import DataLogger
 from lab_tasks.basetask import Basetask
 
 def get_task(cfg):
-    if cfg["task"]["name"] == "baseline_dengler":
-        task = BaselineDengler(cfg=cfg)
-    elif cfg["task"]["name"] == "admipush":
-        task = AdmiPush(cfg = cfg)
-    elif cfg["task"]["name"] == "admipush_vae":
-        task = AdmiPushVAE(cfg = cfg)
-    elif cfg["task"]["name"] == "admipush_cnn":
-        task = AdmiPushCNN(cfg = cfg)
-    elif cfg["task"]["name"] == "admipush_cnn_ee":
-        task = AdmiPushCNNEE(cfg = cfg)
-    elif cfg["task"]["name"] == "baseline_zhang":
+    if cfg["task"]["name"] == "baseline_zhang":
         task = BaselineZhang(cfg = cfg) 
     elif cfg["task"]["name"] == "gatpush":
         task = GatPush(cfg = cfg) 
     else: 
-        task = BaselineTask(cfg=cfg)
+        task = BaselineZhang(cfg=cfg)
     return task
 
 

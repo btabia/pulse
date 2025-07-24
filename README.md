@@ -1,4 +1,4 @@
-# Pushing Unstructured Loose Soft Elements
+# Pushing Unstructured Loose Soft Elements (PULSE)
 
 This tutorial guides you through setting up the environment for the PULSE project, including Isaac Sim, Isaac Lab, and key dependencies.
 

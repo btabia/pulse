@@ -1,0 +1,15 @@
+---
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+    
+defaults:
+    - train: ppo_cnn_baseline # default/ppo/tqc/sac
+    - wandb: baseline_cnn_ppo
+    - hydra: defaults
+    - app: lab_app
+    - env: baseline_cnn_soft
+    - tasks: baseline_zhang
+    - play: baseline_ppo
+

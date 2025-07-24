@@ -14,21 +14,23 @@ import torch.nn.functional as F
 import warp as wp
 from utils.object_manager import ObjectManager
 from utils.vision.dvision import Dvision
-from utils.admittance_controller import AdmittanceController
 
 
-class Impepush(Basetask):
+
+class BaselineSoft(Basetask):
     def __init__(self, cfg):
+        super().__init__()
         #import utilities
         self.cfg = cfg
         self.cpt = 0
         self.num_envs = self.cfg["task"]["num_envs"]
-        #self.particle_prim, self.initial_particle_pos= self.get_particles_position()
+        self.particle_prim, self.initial_particle_pos= self.get_particles_position()
         self.good_reach = False
         self.obj_prim_path = "/World/object"
         self.episode_cpt = 0
         self.bad_episode = False
         self.sim_prev_time = 0
+        self.total_timesteps = 0
 
 
     def initialise_image_array(self):
@@ -64,7 +66,6 @@ class Impepush(Basetask):
         self.prev_time = time.time() 
         self.sim_prev_time = self.sim.current_time
         self.ee_prim = self.get_ee_prim()
-        self.obj_prim = self.get_object_prim()
         self.particule_vis = self.set_part_marker()
         self.particule_middle_vis = self.set_part_marker_middle()
         self.particles_target_f_prev = 0
@@ -76,11 +77,8 @@ class Impepush(Basetask):
         # import depth vision module
         self.dvision = Dvision(self.cfg)
         self.dvision.load_vae_model()
-        # admittance controller
-        self.admittance_controller = AdmittanceController(
-            cfg = self.cfg
-        )
         self.articulation_prim = Articulation(prim_paths_expr = "/World/kinova_7dof_brush/kinova_7dof_brush/robot")
+        self.sim_prev_time_target = self.sim.current_time
         
 
 
@@ -163,6 +161,27 @@ class Impepush(Basetask):
         import torch.utils.dlpack
         import isaacsim.core.utils.bounds as bounds_utils
 
+
+        self.total_timesteps = self.total_timesteps + 1
+
+        _sim_time_target = self.sim.current_time
+        target_dt = _sim_time_target - self.sim_prev_time_target
+        self.sim_prev_time_target = _sim_time_target
+
+
+
+        # target displacement
+        if self.cfg["task"]["target"]["moving"] == True:
+            self.target_position = self.calculate_target_position(
+                self.target_position, 
+                self.total_timesteps, 
+                target_dt, 
+                self.cfg["task"]["target"]["velocity"], 
+                self.device
+            )
+            self.visualiser.visualize(self.target_position)
+
+
         # read real time for fps estimation, not used for control
         _time = time.time() 
         Dt = _time - self.prev_time
@@ -171,7 +190,6 @@ class Impepush(Basetask):
 
   
         # tool observations
-        #print("usd ee position: " + str(self.ee_prim.get_world_poses()))
 
         self.ee_jacobi_idx = self.robot_entity_cfg.body_ids[0] - 1
         self.joint_pos = self.robot.data.joint_pos.clone().to(self.device)
@@ -183,42 +201,25 @@ class Impepush(Basetask):
         self.ee_orientation_rad = th.tensor([self.ee_orientation_rad[0], self.ee_orientation_rad[1], self.ee_orientation_rad[2]], device=self.device)
         self.ee_velocity = ee_vels[:,0:2].to(self.device)
         self.ee_angular_velocity = ee_vels[:,3:6].to(self.device)
-        #ee_pos_x = np.random.uniform(low= 0.1, high= 1.0)
-        #ee_pos_y = np.random.uniform(low= -0.4, high = 0.4)
-        #ee_pos_z = 0.14
-        #ree_pos = th.tensor([[ee_pos_x, ee_pos_y]], device = self.device)
 
-        #obj_pos_x = np.random.uniform(low= 0.1, high= 1.1)
-        #obj_pos_y = np.random.uniform(low= -0.4, high = 0.4)
-        #obj_pos_z = 0
-        
-        #obs_pos = th.tensor([[obj_pos_x, obj_pos_y, obj_pos_z]], device = self.device)
-
-        #obj_ori_z = np.random.uniform(low = 0, high = 2 * np.pi)
-
-        #self.obj_manager.redefine_object(obs_pos, obj_ori_z)
-
-         # force observations
+        # force observations
         self.measured_effort = self.articulation_prim.get_measured_joint_forces()[:, [self.articulation_prim.get_joint_index("end_effector") + 1]]
         self.ee_efforts = self.measured_effort.squeeze(dim = 0).squeeze(dim = 0)
-        #print("ee efforts" + str(self.ee_efforts_xy))
 
-        #medium = self.dvision.process_point_cloud(self.cameras, self.sim.get_physics_dt())
-        if th.numel(self.medium) == 0:
+        medium = self.dvision.process_point_cloud(self.cameras, self.sim.get_physics_dt())
+        if th.numel(medium) == 0:
             print("there is no points in the point cloud")
             self.bad_episode = True
         fmap, hmap, tmap = self.dvision.update_heightmaps(
-            medium_tensor_pc= self.medium, 
+            medium_tensor_pc= medium, 
             target_pc = self.target_lists,
             ee_position = ee_position,
             ee_orientation = self.ee_orientation_rad,
         )
 
-        depth_latent_space = self.dvision.get_latent_space(fmap)
-
         # cartesian and absolutes distances
         dist_pos = self.dvision.calculate_distances(
-            medium_tensor_pc = self.medium, 
+            medium_tensor_pc = medium, 
             target_position=self.target_position,
             ee_position = ee_position, 
             medium_visualiser = self.particule_middle_vis,
@@ -232,6 +233,8 @@ class Impepush(Basetask):
         self.part_pos = dist_pos["particle_mean_pos"]
         self.ee_fpart_pos = dist_pos["ee_fpart_pos"]
         self.ee_fpart_dist = dist_pos["ee_fpart_dist"]
+        self.target_fpart_pos = dist_pos["target_fpart_pos"]
+        self.target_fpart_dist = dist_pos["target_fpart_dist"]
 
 
         if th.any(th.isnan(self.ee_particle_pos)) == True:
@@ -256,13 +259,12 @@ class Impepush(Basetask):
         #print("ee part pos: " + str(m_part_pos))
         tool_obs =  th.concatenate(
                 [
-                    depth_latent_space.squeeze(dim=0),
                     self.ee_orientation_rad,
-                    self.ee_fpart_pos.squeeze(dim=0), # dim 3ff
+                    self.ee_fpart_pos.squeeze(dim=0),
                     self.particle_target_pos.squeeze(dim=0),
-                    self.joint_pos.squeeze(dim=0), #dim 7
-                    self.ee_efforts.to(self.device), 
+                    self.target_fpart_pos.squeeze(dim=0),
                 ])
+        
         
         if th.any(th.isnan(tool_obs)) == True:
             print("particle_target_pos is Nan")
@@ -274,10 +276,9 @@ class Impepush(Basetask):
             self.bad_episode = True
         tool_obs = th.nan_to_num(tool_obs)
         obs = {
+            "fmap": fmap,
             "tool": tool_obs,
         }
-
-
         return {"policy": obs}
 
         
@@ -286,6 +287,7 @@ class Impepush(Basetask):
         from isaaclab.managers import SceneEntityCfg
         from isaaclab.utils.math import euler_xyz_from_quat
         self.episode_cpt = self.episode_cpt + 1
+        self.total_timesteps = 0
         self.bad_episode = False
         self.robot.reset()
         
@@ -342,7 +344,6 @@ class Impepush(Basetask):
 
         # read robot state
         ee_pose = self.robot.data.body_state_w[:, self.robot_entity_cfg.body_ids[0], 0:7].clone().to(self.device)
-        self.prev_ee_pose = ee_pose
         ee_position = ee_pose[:,0:2]
         #self.ee_ftarget_dist_init = th.norm(ee_position - self.fixed_target)
         #ee_orientation_rad = euler_xyz_from_quat(ee_pose[:,3:7])
@@ -351,10 +352,10 @@ class Impepush(Basetask):
         self.robot.reset()
         self.ik_controller.reset()
 
-        self.medium = self.dvision.process_point_cloud(self.cameras, self.sim.get_physics_dt())
+        medium = self.dvision.process_point_cloud(self.cameras, self.sim.get_physics_dt())
         # cartesian and absolutes distances
         dist_pos = self.dvision.calculate_distances(
-            medium_tensor_pc = self.medium, 
+            medium_tensor_pc = medium, 
             target_position=self.target_position,
             ee_position = ee_position, 
             medium_visualiser = self.particule_middle_vis,
@@ -363,8 +364,10 @@ class Impepush(Basetask):
         self.ee_particle_dist_init = dist_pos["ee_particle_dist"]
         self.particle_target_dist_init = dist_pos["particle_target_dist"]
         self.ee_fpart_dist_init = dist_pos["ee_fpart_dist"]
-        #print("f part pos : " + str(dist_pos["fpart_pos"]))
+        self.ee_ftarget_dist_init = dist_pos["target_fpart_dist"]
+
         self.prev_obj_pos = dist_pos["fpart_pos"][0:2]
+        self.sim_prev_time_target = self.sim.current_time
         print("reset done")
 
     def is_done(self) -> tuple[th.Tensor, th.Tensor]:
@@ -375,15 +378,21 @@ class Impepush(Basetask):
     def process_actions(self, actions): 
         from isaaclab.utils.math import quat_from_euler_xyz
         from isaaclab.utils.math import euler_xyz_from_quat
+
+        _sim_time = self.sim.current_time
+        self.sim_dt = _sim_time - self.sim_prev_time
+        self.sim_prev_time = _sim_time
+
         # get the current ee state
         act = actions.clone()
         if act.shape[0] > 1: 
             act = act.unsqueeze(dim=0)
-        Fxy = act[:,0:2] 
+        Pxy = act[:,0:2] 
         Dpsi = act[:,[2]]
 
 
         ee_pose = self.robot.data.body_state_w[:, self.robot_entity_cfg.body_ids[0], 0:7].clone().to(self.device)
+
         ang_command = th.Tensor([np.pi, 0, np.pi]).to(self.device)
         ee_cmd_orientation_rad = euler_xyz_from_quat(ee_pose[:,3:7])
 
@@ -395,8 +404,11 @@ class Impepush(Basetask):
         ang_command = quat_from_euler_xyz(ang_command[0], ang_command[1], ang_command[2])
         self.ang_command = th.tensor([[ang_command[0],ang_command[1], ang_command[2], ang_command[3]]]).to(self.device)
         
-        F_command = th.tensor([[Fxy[0][0], Fxy[0][1], 0]], device = self.device)
-        self.admittance_controller.set_force_command(F_command[:,0:2])
+        self.P_rate = th.tensor([[(ee_pose[0][0] + Pxy[0][0]), (ee_pose[0][1] +  Pxy[0][1]), 0]], device = self.device)
+
+
+    def update_obj_pos(self):
+        pass
 
     def estimate_obj_velocity(self, dt, obj_pos):
         _dt = th.tensor([[dt, dt]], device = self.device)
@@ -410,60 +422,35 @@ class Impepush(Basetask):
         from isaaclab.utils.math import quat_from_euler_xyz
         from isaaclab.utils.math import euler_xyz_from_quat
 
+        self._obj_pos, _ = self.obj_prim.get_world_poses()
+
         # read simulation time for control
-        _sim_time = self.sim.current_time
-        self.sim_dt = _sim_time - self.sim_prev_time
-        self.sim_prev_time = _sim_time
-
         ee_pose = self.robot.data.body_state_w[:, self.robot_entity_cfg.body_ids[0], 0:7].clone().to(self.device)
-        Delta_ee_pose = ee_pose[:, 0:3] - self.prev_ee_pose[:, 0:3]
-
-        Vel_delta_ee_pose = self.estimate_obj_velocity(self.sim_dt, Delta_ee_pose[:,0:2])
-
-        self.prev_ee_pose = ee_pose
-        self.medium = self.dvision.process_point_cloud(self.cameras, self.sim.get_physics_dt())
-        # cartesian and absolutes distances
-        dist_pos = self.dvision.calculate_distances(
-            medium_tensor_pc = self.medium, 
-            target_position=self.target_position,
-            ee_position = ee_pose[:,0:2], 
-            medium_visualiser = self.particule_middle_vis,
-            farthest_visualiser = self.particule_vis,
-        )
-        ee_fpart_pos = dist_pos["ee_fpart_pos"]
-        fpart_pos = dist_pos["fpart_pos"]
-
         effort_obs = self.articulation_prim.get_measured_joint_forces()[:, [self.articulation_prim.get_joint_index("end_effector") + 1]]
         ee_efforts_obs = effort_obs.squeeze(dim = 0).squeeze(dim = 0)
 
-        ee_efforts_xyz = ee_efforts_obs.to(self.device)
-        ee_efforts_xyz = ee_efforts_xyz[0:2]
-        ee_efforts_xyz = ee_efforts_xyz.unsqueeze(dim = 0)
 
-        self.admittance_controller.set_force_observation(ee_efforts_xyz)
-
-        self.admittance_controller.set_delta_pos(Delta_ee_pose)
-        self.admittance_controller.set_delta_vel(Vel_delta_ee_pose)
-
-        z_command = th.tensor([[self.cfg["task"]["action"]["z_command"]]]).to(self.device)
-        pos_command_ = self.admittance_controller.compute(self.sim_dt)
-        fpart_pos = fpart_pos.unsqueeze(dim=0)
-        pos_command_xy = fpart_pos[:,0:2].to(self.device) - pos_command_[:, 0:2]
-        pos_command_z = z_command 
-        pos_command = th.cat([pos_command_xy.squeeze(dim=0), pos_command_z.squeeze(dim=0)]).to(self.device)
-        
-
-        if pos_command[0] < self.cfg["task"]["action"]["xmin_limit"]:
-            pos_command[0] = self.cfg["task"]["action"]["xmin_limit"]
-        if pos_command[0] > self.cfg["task"]["action"]["xmax_limit"]:
-            pos_command[0] = self.cfg["task"]["action"]["xmax_limit"]
-        if pos_command[1] < self.cfg["task"]["action"]["ymin_limit"]:
-            pos_command[1] = self.cfg["task"]["action"]["ymin_limit"]
-        if pos_command[1] > self.cfg["task"]["action"]["ymax_limit"]:
-            pos_command[1] = self.cfg["task"]["action"]["ymax_limit"]
+        self.logging_data = {
+                "episode": self.episode_cpt,
+                "brush_position": ee_pose[:,0:3].squeeze(dim=0).cpu().numpy().tolist(),
+                "debris_position": self._obj_pos[:,0:2].squeeze(dim=0).cpu().numpy().tolist(),
+                "target_position": self.target_position.squeeze(dim=0).cpu().numpy().tolist(),
+                "contact_force": ee_efforts_obs.cpu().numpy().tolist(),
+            }
 
 
-        pos_command = pos_command.unsqueeze(dim=0)
+        pos_command = self.P_rate
+        pos_command[:,2] = self.cfg["task"]["action"]["z_command"]
+
+        if pos_command[:,0] < self.cfg["task"]["action"]["xmin_limit"]:
+            pos_command[:,0] = self.cfg["task"]["action"]["xmin_limit"]
+        if pos_command[:,0] > self.cfg["task"]["action"]["xmax_limit"]:
+            pos_command[:,0] = self.cfg["task"]["action"]["xmax_limit"]
+        if pos_command[:,1] < self.cfg["task"]["action"]["ymin_limit"]:
+            pos_command[:,1] = self.cfg["task"]["action"]["ymin_limit"]
+        if pos_command[:,1] > self.cfg["task"]["action"]["ymax_limit"]:
+            pos_command[:,1] = self.cfg["task"]["action"]["ymax_limit"]
+
         command = th.tensor([[pos_command[:,0], pos_command[:,1], pos_command[:,2], self.ang_command[:,0], self.ang_command[:,1], self.ang_command[:,2], self.ang_command[:,3]]])
         self.ik_controller.set_command(command)
 
@@ -489,8 +476,8 @@ class Impepush(Basetask):
         dist_a = - self.dist_normalized(0, self.ee_fpart_dist_init  , self.ee_fpart_dist)
         #dist_b =  - self.dist_normalized(0, self.ee_particle_dist_init, self.ee_particle_dist)
         dist_c = - self.dist_normalized(0, self.particle_target_dist_init, self.particle_target_dist)
-        #dist_d = - self.dist_normalized(0, self.ee_ftarget_dist_init, self.ee_ftarget_dist)
-        reward[0] =  dist_a + dist_c 
+        dist_d = - self.dist_normalized(0, self.ee_ftarget_dist_init, self.target_fpart_dist)
+        reward[0] =  dist_a + dist_c + dist_d
         #print("dist a reward: " + str(dist_a))
         #print("dist b reward: " + str(dist_b))
         #print("dist c reward: " + str(dist_c))
@@ -512,20 +499,25 @@ class Impepush(Basetask):
     
     def reset_robot_position(self):
         from isaaclab.utils.math import quat_from_euler_xyz
-        ee_init_pos = self.cfg["task"]["init"]["robot"]
-        dx = self.cfg["task"]["init"]["robot_dx"]
-        dy = self.cfg["task"]["init"]["robot_dy"]
-        robot_x = np.random.uniform(low= ee_init_pos[0] - dx, high= ee_init_pos[0] + dx)
-        robot_y = np.random.uniform(low= ee_init_pos[1] - dy, high= ee_init_pos[1] + dy)
-        robot_z = self.cfg["task"]["action"]["z_command"]
-        robot_x = np.round(robot_x, decimals = 4)
-        robot_y = np.round(robot_y, decimals = 4)
-        yaw = np.random.uniform(low=(0), high = 2 * (np.pi)) 
+        if self.cfg["task"]["init"]["randomize"] == True:
+            ee_init_pos = self.cfg["task"]["init"]["robot"]
+            dx = self.cfg["task"]["init"]["robot_dx"]
+            dy = self.cfg["task"]["init"]["robot_dy"]
+            robot_x = np.random.uniform(low= ee_init_pos[0] - dx, high= ee_init_pos[0] + dx)
+            robot_y = np.random.uniform(low= ee_init_pos[1] - dy, high= ee_init_pos[1] + dy)
+            robot_z = self.cfg["task"]["action"]["z_command"]
+            robot_x = np.round(robot_x, decimals = 4)
+            robot_y = np.round(robot_y, decimals = 4)
+            yaw = np.random.uniform(low=(0), high = 2 * (np.pi)) 
 
-        pos_command = th.tensor([[robot_x, robot_y, robot_z]])
-        
-        quat_command = quat_from_euler_xyz(th.tensor([np.pi]), th.tensor([0]), th.tensor([yaw]))
-        quat_command = th.tensor([[quat_command[:,0],quat_command[:,1], quat_command[:,2], quat_command[:,3]]])
+            pos_command = th.tensor([[robot_x, robot_y, robot_z]])
+            
+            quat_command = quat_from_euler_xyz(th.tensor([np.pi]), th.tensor([0]), th.tensor([yaw]))
+            quat_command = th.tensor([[quat_command[:,0],quat_command[:,1], quat_command[:,2], quat_command[:,3]]])
+        else:
+            pos_command = th.tensor([[self.cfg["task"]["init"]["robot"][0], self.cfg["task"]["init"]["robot"][1], self.cfg["task"]["action"]["z_command"]]])
+            quat_command = quat_from_euler_xyz(th.tensor([np.pi]), th.tensor([0]), th.tensor([np.pi/2]))
+            quat_command = th.tensor([[quat_command[:,0],quat_command[:,1], quat_command[:,2], quat_command[:,3]]])
         command = th.tensor([[pos_command[:,0], pos_command[:,1], pos_command[:,2], quat_command[:,0], quat_command[:,1], quat_command[:,2], quat_command[:,3]]], device = self.device)
         return command
     
@@ -533,39 +525,21 @@ class Impepush(Basetask):
         from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
         import isaaclab.sim as sim_utils
         from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
-        target_init_pos = self.cfg["task"]["init"]["target"]
-        dx = self.cfg["task"]["init"]["target_dx"]
-        dy = self.cfg["task"]["init"]["target_dy"]
-        target_x = np.random.uniform(low= target_init_pos[0] - dx, high= target_init_pos[0] + dx)
-        target_y = np.random.uniform(low= target_init_pos[1] - dy, high= target_init_pos[1] + dy) 
-        target_position = th.tensor([[target_x, target_y, 0.01]], device = self.device)
+        if self.cfg["task"]["init"]["randomize"] == True:
+            target_init_pos = self.cfg["task"]["init"]["target"]
+            dx = self.cfg["task"]["init"]["target_dx"]
+            dy = self.cfg["task"]["init"]["target_dy"]
+            target_x = np.random.uniform(low= target_init_pos[0] - dx, high= target_init_pos[0] + dx)
+            target_y = np.random.uniform(low= target_init_pos[1] - dy, high= target_init_pos[1] + dy) 
+            target_position = th.tensor([[target_x, target_y, 0.01]], device = self.device)
+        else:
+            target_init_pos = self.cfg["task"]["init"]["target"]
+            target_position = th.tensor([[target_init_pos[0], target_init_pos[1], 0.01]], device = self.device)
 
         self.visualiser.visualize(target_position)
 
         return target_position
     
-    def reset_rigid_object_position(self, prim, ee_pos, target_pos):
-        init_pos = np.array(self.cfg["task"]["init"]["medium"])
-        dx = self.cfg["task"]["init"]["debris_dx"]
-        dy = self.cfg["task"]["init"]["debris_dy"]
-        medium_x = np.random.uniform(low= init_pos[0]-dx, high=init_pos[0]+dx)
-        medium_y = np.random.uniform(low= init_pos[1]-dy, high=init_pos[1]+dy) 
-
-        medium_pos = th.tensor([[medium_x, medium_y, init_pos[2]]], device = self.device)
-
-        dist_a = th.norm(medium_pos[:,0:2] - ee_pos).item()
-        dist_b = th.norm(medium_pos[:,0:2] - target_pos).item()
-
-        while(dist_a <=  self.cfg["task"]["init"]["object_ee_min_dist"] or dist_b <=  self.cfg["task"]["init"]["debris_target_min_dist"]):
-            medium_x = np.random.uniform(low= init_pos[0]-dx, high=init_pos[0]+dx)
-            medium_y = np.random.uniform(low= init_pos[1]-dy, high=init_pos[1]+dy) 
-            medium_pos = th.tensor([[medium_x, medium_y, init_pos[2]]], device = self.device)
-            dist_a = th.norm(medium_pos[:,0:2] - ee_pos).item()
-            dist_b = th.norm(medium_pos[:,0:2] - target_pos).item()
-        
-        obj_ori_z = np.random.uniform(low = 0, high = 2 * np.pi)
-
-        self.obj_prim = self.obj_manager.redefine_object(medium_pos, heading = obj_ori_z)
 
     def reset_particles_position(self, prim, initial_position, ee_pos, target_pos):
         from pxr import Usd, UsdGeom, Gf
@@ -613,7 +587,8 @@ class Impepush(Basetask):
     
     def target_reached(self): 
         reach = False
-        if self.particle_target_dist < self.cfg["task"]["done"]["debris_target_mean_dist"]:
+        active = self.cfg["task"]["done"]["active"]
+        if self.particle_target_dist < self.cfg["task"]["done"]["debris_target_mean_dist"] and active == True:
             reach = True
             self.good_reach = True
             print("---- Target Reached ----")

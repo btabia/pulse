@@ -218,7 +218,9 @@ class Dvision:
         particles_target_fidx = th.argmax(particles_target_dists)
         f_part_pos = medium_tensor_pc[particles_target_fidx]
         ee_fpart_pos = f_part_pos[0:2] - ee_position
+        target_fpart_pos = f_part_pos[0:2] - target_position[:,0:2]
         ee_fpart_dist = th.norm((ee_fpart_pos), dim = 1)
+        target_fpart_dist = th.norm((target_fpart_pos), dim = 1)
         farthest_visualiser.visualize(th.tensor([[f_part_pos[0], f_part_pos[1], 0.05]]))
 
         output = {
@@ -230,40 +232,12 @@ class Dvision:
             "fpart_pos": f_part_pos,
             "ee_fpart_pos": ee_fpart_pos,
             "ee_fpart_dist": ee_fpart_dist,
+            "target_fpart_pos": target_fpart_pos,
+            "target_fpart_dist": target_fpart_dist,
         }
         return output
-        #print("mediim pos : " + str(particle_mean_pos))
-        #print(" ee dist : " + str(ee_position))
-        #print("ee particle dist:  " + str(ee_particle_dist))
 
-        #particles_target_dists = medium_tensor_pc - target_position.to(self.device)
-        #particles_target_dists = particles_target_dists[:,0:2]
-        #particles_target_dists = th.norm(particles_target_dists, dim=1)
-        #if th.numel(particles_target_dists) != 0:
-        #    particles_target_f = th.max(particles_target_dists)
-        #    particles_target_fidx = th.argmax(particles_target_dists)
-        #    #print("particles target dist : " + str(particles_target_dists))
-        #    particles_target_dist_mean = th.mean(particles_target_dists.flatten()) # scalar
-        #    f_part_pos = medium_tensor_pc[particles_target_fidx]
-        #    #self.particule_vis.visualize(th.tensor([[f_part_pos[0], f_part_pos[1], 0.01]]))
-        #    ee_fpart_pos = f_part_pos[0:2] - ee_position
-        #    particles_ee_dist = th.norm((ee_part_pos), dim=1)
-        #    self.particles_target_f_prev = particles_target_f 
-        #    self.particles_target_dist_mean_prev = particles_target_dist_mean
-        #    self.particles_ee_dist_prev = particles_ee_dist
-        #    self.ee_fpart_pos_prev = ee_fpart_pos
-        #    self.part_target_pos_prev = part_target_pos
-        #    self.ee_part_pos_prev = ee_part_pos
-        #else: 
-        #    particles_target_f = self.particles_target_f_prev
-        #    particles_target_dist_mean = self.particles_target_dist_mean_prev
-        #    particles_ee_dist = self.particles_ee_dist_prev
-        #    ee_fpart_pos = self.ee_fpart_pos_prev 
-       #     part_target_pos = self.part_target_pos_prev 
-        #    ee_part_pos = self.ee_part_pos_prev
-        
-        #return ee_particle_pos, ee_particle_dist, particle_target_pos, particle_target_dist, particle_mean_pos
-    
+
     def pointcloud_to_heightmap_warp(self,pointcloud, heightmap_size, height_range=(0, 1), device='cuda'):
         """
         Converts a 3D point cloud into a heightmap using grid_sample on the GPU.
