@@ -1,0 +1,46 @@
+program: /home/btabia/git/new/Malleabot/train_sac.py
+method: bayes
+metric:
+  name: Reward / Total reward (mean)
+  goal: maximize
+early_terminate: 
+  type: hyperband
+  strict: True
+  min_iter: 25
+  eta: 3
+parameters:
+  train.RL.algo.polyak: 
+    distribution: uniform
+    min: 0.0001
+    max: 0.5
+  train.RL.algo.batch_size:
+    values: [512,1024,2048,4096] 
+  train.RL.algo.mixed_precision:
+    values: [False, True] 
+  train.RL.algo.actor_learning_rate:
+    distribution: uniform
+    min: 0.0001
+    max: 0.001
+  train.RL.algo.critic_learning_rate:
+    distribution: uniform
+    min: 0.0001
+    max: 0.001
+  train.RL.algo.entropy_learning_rate:
+    distribution: uniform
+    min: 0.0001
+    max: 0.001
+  train.RL.algo.discount_factor:
+    distribution: uniform
+    min: 0.98
+    max: 0.999
+  train.RL.algo.initial_entropy_value:
+    distribution: uniform
+    min: 0.05
+    max: 0.9
+
+command:
+  - ${env}
+  - ${CUDA_VISIBLE_DEVICES}
+  - python
+  - ${program}
+  - ${args_no_hyphens}

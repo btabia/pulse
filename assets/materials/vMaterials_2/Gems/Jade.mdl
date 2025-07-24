@@ -1,0 +1,133 @@
+/******************************************************************************
+ *          Copyright 2024 NVIDIA Corporation. All rights reserved.           *
+ ******************************************************************************
+ 
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our 
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL 
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA's Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any 
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR 
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, 
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF 
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+mdl 1.6;
+
+import ::anno::*;
+import ::base::texture_return;
+import ::nvidia::core_definitions::perlin_noise_texture;
+import ::state::normal;
+import ::nvidia::core_definitions::thick_translucent;
+import ::nvidia::core_definitions::dimension;
+
+const string COPYRIGHT = 
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+
+export material Jade(
+    color transmission_color1 = color ( 0.8352941f , 0.8431373f , 0.6039216f)
+    [[
+        ::anno::display_name("Transmission Color 1"),
+        ::anno::description("Color effect for transmission independent of thickness of the object."),
+        ::anno::in_group("Appearance")
+    ]],
+    color transmission_color2 = color ( 0.4392157f , 0.6509804f , 0.282353f)
+    [[
+        ::anno::display_name("Transmission Color 2"),
+        ::anno::description("Color effect for transmission independent of thickness of the object."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform color volume_color = color ( 0.3488667f , 0.4877647f , 0.3940823f)
+    [[
+        ::anno::display_name("Volume Color"),
+        ::anno::description("Color effect for volume of the object reached at transmission distance."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float clarity = 1.f
+    [[
+        ::anno::display_name("Clarity"),
+        ::anno::description("Use to adapt to size of gem, smaller numbers darken the gem."),
+        ::anno::soft_range(0.1,10.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float3 texture_translate  =  float3 ( 0.f)
+    [[
+        ::anno::display_name("Translate"),
+        ::anno::description("Controls the position of the texture."),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float3 texture_rotate = float3 ( 0.f)
+    [[
+        ::anno::display_name("Rotate"),
+        ::anno::description("Rotates angle of the texture in degrees."),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float3 texture_scale = float3 ( 1.f)
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+        ::anno::in_group("Transform"),
+		::nvidia::core_definitions::dimension(float3(1.0f, 1.0f, 1.0f))
+    ]])
+[[
+	::anno::display_name("Jade"),
+    ::anno::description("Jade gem material (Default values based on 2cm stone size.)"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+    ::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Jade.Jade.png"),
+	::anno::key_words(string[]("gem", "jewelry", "gemstone", "transmissive", "new", "design", "jade", "green"))
+]]= 
+::nvidia::core_definitions::thick_translucent(
+    transmission_color:  ::nvidia::core_definitions::perlin_noise_texture(
+        color1:  transmission_color1,
+        color2:  transmission_color2,
+        object_space:  true,
+        noise_levels:  3,
+        absolute_noise:  true,
+        noise_threshold_high:  0.5f,
+        noise_threshold_low:  0.f,
+        scaling:  float3 ( (1.f / texture_scale.x) * 400.f , (1.f / texture_scale.y) * 400.f , (1.f / texture_scale.z) * 380.f),
+        translation:  texture_translate ,
+        rotation:  texture_rotate + float3 ( 0.f, 0.f, 0.f),
+        texture_space:  0).tint,
+    volume_color:  volume_color,
+    volume_scattering:  0.98f,
+    roughness:  0.1f,
+    reflectivity:  0.85f,
+    base_thickness:  clarity * 0.01f,
+    normal:  ::state::normal (),
+    ior:  1.61f);

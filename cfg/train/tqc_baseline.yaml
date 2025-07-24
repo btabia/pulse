@@ -1,0 +1,33 @@
+---
+
+RL:
+  load_policy: False 
+  load_policy_path: "/home/btabia/git/residual_soft_push/training_data/TQC_996/checkpoint_80000_steps.zip"
+  policy: "MultiInputPolicy"
+  policy_kwargs: 
+    nn_config: 
+      activation_function: "Relu"
+      net_arch: [512,256,128]
+      n_critics: 2
+
+  max_timestep: 2000000
+  checkpoint:
+    saving_freq: 5000
+    base_directory: "./training_data/"
+  
+  algo:
+    type: "TQC" 
+    sigma: 0.5731757062036922
+    learning_rate: 0.0008348836525320726  #0.0008228541591865843 # 0.0008644140889825173
+    batch_size : 256
+    tau : 0.4105026275542235
+    gamma : 0.96970347401278
+    buffer_size : 1e6
+    train_freq: 15
+    learning_starts : 10000 # 10000 for this reload
+    top_quantiles_to_drop_per_net : 2
+    gradient_steps : -1
+    verbose : 1
+    device : "cuda:${oc.env:CUDA_DEVICE}"
+    seed: 42
+

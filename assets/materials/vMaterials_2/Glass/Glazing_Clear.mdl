@@ -1,0 +1,79 @@
+/*****************************************************************************
+*     Copyright 2024 NVIDIA Corporation. All rights reserved.
+******************************************************************************
+
+ MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,
+ WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR, 
+ THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+ MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF 
+ COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA
+ CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING
+ ANY GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, 
+ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF 
+ THE USE OR INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN 
+ THE MDL MATERIALS.
+*/
+
+mdl 1.4;
+import ::anno::*;
+import ::state::*;
+import ::nvidia::core_definitions::*;
+
+const string COPYRIGHT = 
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+export material Glazing_Clear(
+    uniform color glass_color = color(0.92,0.93,0.92) 
+    [[
+        ::anno::display_name("Color"), 
+        ::anno::description("Choose the color of the glass."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness = 0.0
+    [[
+        ::anno::display_name("Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float ior = 1.518f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]],
+    uniform float clarity     = 1.f
+    [[ 
+        ::anno::display_name("Clarity"), 
+        ::anno::description("Smaller values darken the glass."),
+        ::anno::soft_range(0.1,10.0),
+        ::anno::in_group("Advanced")
+    ]]
+) [[ 
+    ::anno::display_name("Glazing - Clear Glass"),
+	::anno::description("Glazing material for construction and architecture"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "glass", "glazing", "architecture", "window", "translucent", "clear")),
+	::anno::thumbnail("./.thumbs/Glazing_Clear.Glazing_Clear.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] = 
+
+::nvidia::core_definitions::thick_glass_v2(
+    transmission_color:    color ( 1.f , 1.f , 1.f),
+    glass_color:    glass_color,
+    roughness:      reflection_roughness,
+    ior:            ior,
+    base_thickness: clarity
+);

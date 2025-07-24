@@ -1,0 +1,756 @@
+/******************************************************************************
+ *	 Copyright 2024 NVIDIA Corporation. All rights reserved.
+ ******************************************************************************
+ 
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our 
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL 
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA's Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any 
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR 
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, 
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF 
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+mdl 1.7;
+
+import ::anno::*;
+import ::base::*;
+import ::df::*;
+import ::math::*;
+import ::state::*;
+import ::tex::*;
+import ::nvidia::core_definitions::blend_colors;
+import ::nvidia::core_definitions::dimension;
+
+const string COPYRIGHT = 
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+struct vm_coordinates{
+	float2 uv;			// UV coordinates stored as a simple float2
+	float rotation;		// The rotation is stored in radiands (not degress), to convert use ((rotation* 3.1415926535897932384626433832f) / 180.f)
+	int uv_space_index;	// The UV space Index from which the UV data came from
+	float4 carry;		// may carry additional data, such as random IDs
+};
+
+struct vm_3float{
+	float x;
+	float y;
+	float z;
+};
+
+struct vm_4float{
+	float x;
+	float y;
+	float z;
+	float w;
+};
+
+struct vm_col_norm{
+	float3 value;
+	float3 norm;
+};
+
+enum vm_mono_select 
+[[
+	::anno::description("Modes for the creation of a gray-scale value from a color."),
+	::anno::hidden()
+]]
+{
+	mono_r = 0,
+	mono_g = 1,
+	mono_b = 2,
+	mono_a = 3,
+	mono_average = 4
+};
+
+vm_coordinates vm_coord
+(
+	float2 translation	= float2(0.0f, 0.0) [[
+		::anno::display_name("Translation"),
+		::anno::description("Translates the coordinates.")
+	]],
+	float rotation 		= 0.0f [[
+		::anno::display_name("Rotation"),
+		::anno::description("Rotates the coordinates in degrees.")
+	]],
+	float2 scaling		= float2(1.0f, 1.0f) [[
+		::anno::display_name("Scaling"),
+		::anno::description("Scales the coordinates.")
+	]],	
+	uniform int uv_space = 0 [[
+		::anno::display_name("UV Space"),
+		::anno::description("Chose the UV space.")
+	]]
+)
+[[
+		::anno::display_name("vm Transform"),
+		::anno::description("Generates coordinates to be used in vm_lookup functions.")
+]]
+{
+	vm_coordinates uv;
+	::base::texture_coordinate_info info = ::base::coordinate_source( ::base::texture_coordinate_uvw, uv_space);
+	uv.rotation = (rotation * 3.1415926535897932384626433832f) / 180.f;
+	uv.uv = float2(info.position.x, info.position.y);
+	float sine   = ::math::sin(uv.rotation);
+	float cosine = ::math::cos(uv.rotation);
+	float2x2 rot = float2x2(cosine, -sine, sine, cosine);
+	uv.uv = rot * uv.uv;
+	uv.uv /= scaling;
+	uv.uv += translation;
+	// Translation before or after rotation?
+	return uv;
+}
+
+vm_coordinates vm_coord_post_scale(
+	vm_coordinates uv = vm_coord(),
+	float2 scale = float2(1.0f)
+)
+{
+	uv.uv /= scale;
+	return uv;
+}
+
+::base::texture_return vm_tex_lookup(
+	uniform texture_2d tex,
+	vm_coordinates uv = vm_coord(),
+	uniform vm_mono_select mono_source = mono_a,
+	float4 scale = float4(1.0f))
+{
+	float mono;
+	float4 lookup = ::tex::lookup_float4(tex, uv.uv, ::tex::wrap_repeat, ::tex::wrap_repeat) * scale;
+	switch( mono_source ) {
+		case mono_r: mono = lookup.x;
+			break;
+		case mono_g: mono = lookup.y;
+			break;
+		case mono_b: mono = lookup.z;
+			break;
+		case mono_a: mono = lookup.w;
+			break;
+		case mono_average: mono = ::math::average(float3(lookup.x, lookup.y, lookup.z));
+			break;
+	}
+	return ::base::texture_return(color(lookup.x, lookup.y, lookup.z), mono);
+}
+
+float3 vm_tex_normal_lookup(
+	uniform texture_2d tex,
+	vm_coordinates uv = vm_coord(),
+	float strength = 1.0f
+)
+{
+	float rot = uv.rotation;
+	// Lookup and convert normal texture to -1 ... 1 range
+	float3 norm = (::tex::lookup_float3(tex, uv.uv, ::tex::wrap_repeat, ::tex::wrap_repeat) - float3(.5f)) * 2.0f;
+	norm = ::math::normalize(norm * float3(strength, strength, 1.0));
+	// if any rotation happened prior to the lookup, compensate for it
+	norm = float3(::math::cos(rot) * norm.x - ::math::sin(rot) * norm.y,
+					::math::sin(rot) * norm.x + ::math::cos(rot) * norm.y,
+					norm.z);
+	return norm.x * ::state::texture_tangent_u(uv.uv_space_index) +
+			norm.y * ::state::texture_tangent_v(uv.uv_space_index) +
+			norm.z * ::state::normal();
+}
+
+float remap_xy_to_0_1(float input, float x, float y)
+{
+	return (input - x)/(y - x);
+}
+
+float uint2float(int x)
+{
+	return float(x & 0x7FFFFFFF) + (x < 0 ? 2147483648.0 : 0.0);
+}
+
+int lowbias32(int x)
+{
+	x ^= x >>> 16;
+	x *= 0x7feb352d;
+	x ^= x >>> 15;
+	x *= 0x846ca68b;
+	x ^= x >>> 16;
+	return x;
+}
+
+float2 rnd22(int2 p) {
+	float2 ret_val = float2(
+		uint2float(lowbias32(p[0] + lowbias32(p[1]))) / 4294967296.f,
+		uint2float(lowbias32(p[0] + 32000 + lowbias32(p[1]))) / 4294967296.f
+	);
+	return ret_val;
+}	
+
+float2x2 invert_2x2(float2x2 M)
+{
+	float det = M[0][0]*M[1][1] - M[0][1]*M[1][0];
+	//https://www.chilimath.com/lessons/advanced-algebra/inverse-of-a-2x2-matrix/
+	return (1.0 / det) * float2x2(M[1][1], -M[0][1], -M[1][0], M[0][0]);
+}
+
+float3 vm_tex_infinite(
+	uniform texture_2d tex = texture_2d(),
+	vm_coordinates uv = vm_coord(),
+	float3 average_color = float3(0.5f, 0.5f, 1.0f),
+	float patch_size = 1.0,
+	bool gamma_correct = true,
+	float gamma = 2.2f
+)
+{
+	float2 uv_in = uv.uv;
+	
+	float3 O = float3(0.f);
+	float2x2 M0 = float2x2(1.f,0.f, 0.5f, ::math::sqrt(3.f)/2.f);
+	float2x2 M = invert_2x2(M0); // transform matrix <-> tilted space
+	
+	float2 U = uv_in;
+	float2 V = M * (uv.uv / patch_size); //pre-tilted hexa coordinates
+	int2 I = int2(::math::floor(V))+int2(935); // hexa-tile id
+	
+	// The mean color needs to be determined in Photoshop then to make the
+	// average color work out, take the float value and calculate the apropriate
+	// mean value as (value^(1/2.2))
+
+	float3 m = average_color;
+	
+	float3 F = float3(::math::frac(V)[0], ::math::frac(V)[1], 0.f), W;
+	F[2] = 1.0 - F[0] - F[1]; // local hexa coordinates
+	
+	if( F[2] > 0.f )
+		O = (W[0] = F[2]) * (( ::tex::lookup_float3(tex, U-rnd22(I))) - m)
+		  + (W[1] = F[1]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(0,1)))) - m)
+		  + (W[2] = F[0]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(1,0)))) - m);
+	else
+		O = (W[0] =	  -F[2]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(1))))   - m)
+		  + (W[1] = 1.f - F[1]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(1, 0)))) - m)
+		  + (W[2] = 1.f - F[0]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(0, 1)))) - m);
+	O = m + O/::math::length(W);
+	O = ::math::clamp( (O), 0.0f, 1.0f);
+	
+	return gamma_correct? ::math::pow(::math::max(O, float3(0.0f)), gamma) : float3(O);
+}
+
+vm_col_norm vm_tex_infinite_color_normal(
+	uniform texture_2d tex_col = texture_2d(),
+	uniform texture_2d tex_norm = texture_2d(),
+	vm_coordinates uv = vm_coord(),
+	float3 average_color = float3(0.5),
+	float3 average_norm = float3(0.5f, 0.5f, 1.0f),
+	float patch_size = 1.0,
+	// Color output settings
+	bool color_out_gamma_correct = true,
+	float color_out_gamma = 2.2f,
+	// Normal output setting
+	float normal_strength = 1.0
+)
+{
+	vm_col_norm ret;
+	float2 uv_in = uv.uv;
+	
+	float3 O_a = float3(0.f);
+	float3 O_b = float3(0.f);
+	float2x2 M0 = float2x2(1.f,0.f, 0.5f, ::math::sqrt(3.f)/2.f);
+	float2x2 M = invert_2x2(M0); // transform matrix <-> tilted space
+	
+	float2 U = uv_in;
+	float2 V = M * (uv.uv / patch_size); //pre-tilted hexa coordinates
+	int2 I = int2(::math::floor(V))+int2(935); // hexa-tile id
+	
+	// The mean color needs to be determined in Photoshop then to make the
+	// average color work out, take the float value and calculate the apropriate
+	// mean value as (value^(1/2.2))
+
+	float3 m_a = average_color;
+	float3 m_b = average_norm;
+
+	float3 F = float3(::math::frac(V)[0], ::math::frac(V)[1], 0.f), W;
+	F[2] = 1.0 - F[0] - F[1]; // local hexa coordinates
+	
+	if( F[2] > 0.f )
+	{
+		O_a = (W[0] = F[2]) * (( ::tex::lookup_float3(tex_col, U-rnd22(I))) - m_a)
+		  + (W[1] = F[1]) * (( ::tex::lookup_float3(tex_col, U-rnd22(I+int2(0,1)))) - m_a)
+		  + (W[2] = F[0]) * (( ::tex::lookup_float3(tex_col, U-rnd22(I+int2(1,0)))) - m_a);
+		O_b = (W[0] = F[2]) * (( ::tex::lookup_float3(tex_norm, U-rnd22(I))) - m_b)
+		  + (W[1] = F[1]) * (( ::tex::lookup_float3(tex_norm, U-rnd22(I+int2(0,1)))) - m_b)
+		  + (W[2] = F[0]) * (( ::tex::lookup_float3(tex_norm, U-rnd22(I+int2(1,0)))) - m_b);
+	}
+	else
+	{
+		O_a = (W[0] =	  -F[2]) * (( ::tex::lookup_float3(tex_col, U-rnd22(I+int2(1))))   - m_a)
+		  + (W[1] = 1.f - F[1]) * (( ::tex::lookup_float3(tex_col, U-rnd22(I+int2(1, 0)))) - m_a)
+		  + (W[2] = 1.f - F[0]) * (( ::tex::lookup_float3(tex_col, U-rnd22(I+int2(0, 1)))) - m_a);
+		O_b = (W[0] =	  -F[2]) * (( ::tex::lookup_float3(tex_norm, U-rnd22(I+int2(1))))   - m_b)
+		  + (W[1] = 1.f - F[1]) * (( ::tex::lookup_float3(tex_norm, U-rnd22(I+int2(1, 0)))) - m_b)
+		  + (W[2] = 1.f - F[0]) * (( ::tex::lookup_float3(tex_norm, U-rnd22(I+int2(0, 1)))) - m_b);
+	}
+	
+	O_a = m_a + O_a/::math::length(W);
+	O_a = ::math::clamp( (O_a), 0.0, 1.0);
+	ret.value = color_out_gamma_correct? ::math::pow(::math::max(O_a, float3(0.0f)), color_out_gamma) : float3(O_a);
+	
+	O_b = m_b + O_b/::math::length(W);
+	O_b = ::math::clamp( (O_b), 0.0, 1.0);
+	
+	float3 norm = (O_b - float3(.5f)) * 2.0f;
+	norm = ::math::normalize(norm * float3(normal_strength, normal_strength, 1.0));
+	// if any rotation happened prior to the lookup, compensate for it
+	norm = float3(::math::cos(uv.rotation) * norm.x - ::math::sin(uv.rotation) * norm.y,
+					::math::sin(uv.rotation) * norm.x + ::math::cos(uv.rotation) * norm.y,
+					norm.z);
+	ret.norm = norm.x * ::state::texture_tangent_u(uv.uv_space_index) +
+			norm.y * ::state::texture_tangent_v(uv.uv_space_index) +
+			norm.z * ::state::normal();	
+			
+	return ret;
+}
+
+float histogram_range(float input, float range = 1.0f, float position = 0.5f)
+{	
+	float low = ::math::clamp(1.0 - ::math::min(((1.0 - position) + range * 0.5), (1.0 - position) * 2), 0.0, 1.0);
+	float high = ::math::clamp(::math::min((position + range * 0.5 ), position * 2.0), 0.0, 1.0);
+	return ::math::lerp(low, high, input);
+}
+
+float histogram_scan_big(float input, float width, float position)
+{
+	return ::math::clamp(
+				remap_xy_to_0_1(input,
+								::math::lerp(-width, 1.0, position),
+								position * (1.0 + width)), // special case of ::math::lerp(0.0, 1.0 + width, position)),
+				0.0,
+				1.0);
+}
+
+
+struct volume_info{
+	color absorption_coefficient;
+	color scattering_coefficient;
+};
+
+
+
+// simplified volume coefficients
+// This function takes a transmittance value and and albedo and translates it into meaningful
+// scattering and volume coefficients that are userfriendly
+//
+volume_info volume_transmittance_albedo(
+	float density_scale = 1.0,
+	color transmittance = color(0.5f), // transmittance color after unit distance
+	color albedo = color(1.0f)
+)
+[[
+	::anno::noinline()
+]]
+{
+	color sigma_t = -::math::log(::math::saturate(transmittance)) * density_scale;
+	color sigma_s = sigma_t * ::math::saturate(albedo);
+	return volume_info(
+		scattering_coefficient: sigma_s,
+		absorption_coefficient: sigma_t - sigma_s);
+}
+
+vm_3float vm_util_balanced_weight(
+	uniform float input_1 [[::anno::in_group("Inputs")]],
+	uniform float input_2 [[::anno::in_group("Inputs")]],
+	uniform float input_3 [[::anno::in_group("Inputs")]],
+	float weight_1 [[::anno::in_group("Output Weights")]],
+	float weight_2 [[::anno::in_group("Output Weights")]],
+	float weight_3 [[::anno::in_group("Output Weights")]]
+)
+[[
+	::anno::description("Takes three inputs and scales them so that the largest weight is scaled to 1.0 " 
+						"E.g. inputs (0.2, 0.1, 0.05) will result in (1.0, 0.5, 0.25).")
+]]
+{
+	vm_3float result; 
+	
+	float max = ::math::max(::math::max(input_1, input_2), input_3);
+	if(max > 0.0f)
+	{
+		result.x = (input_1/max) * weight_1;
+		result.y = (input_2/max) * weight_2;
+		result.z = (input_3/max) * weight_3;
+	}
+	else
+	{
+		result.x = weight_1;
+		result.y = weight_2;
+		result.z = weight_3;
+	}
+	return result;
+}
+
+// This function takes three black and white maps inputs (floats) and composits
+// them over the input color. The input maps can be adjusted using the controls
+// 'width' and 'position' which corresponds to the controls of the 'histogram_scan_big' function
+color vm_comp_dirt_overlay_3x
+(
+	color input [[::anno::in_group("Inputs")]],
+	float overlay_map_1 [[::anno::in_group("Inputs"), ::anno::description("Input for overlay map 1.")]],
+	float overlay_map_2 [[::anno::in_group("Inputs"), ::anno::description("Input for overlay map 2.")]],
+	float overlay_map_3 [[::anno::in_group("Inputs"), ::anno::description("Input for overlay map 3.")]],
+	float width_1	= 1.0f [[::anno::in_group("Adjustments", "Map 1"), ::anno::description("Controls the transition width of the first overlay map input. Small values cause a hard transition.")]],
+	float position_1 = 0.5f [[::anno::in_group("Adjustments", "Map 1"), ::anno::description("Sets the midpoint from where the contrast will be applied.")]],
+	float width_2	= 1.0f [[::anno::in_group("Adjustments", "Map 2"), ::anno::description("Controls the transition width of the second overlay map input. Small values cause a hard transition.")]],
+	float position_2 = 0.5f [[::anno::in_group("Adjustments", "Map 2"), ::anno::description("Sets the midpoint from where the contrast will be applied.")]],
+	float width_3	= 1.0f [[::anno::in_group("Adjustments", "Map 3"), ::anno::description("Controls the transition width of the third overlay map input. Small values cause a hard transition.")]],
+	float position_3 = 0.5f [[::anno::in_group("Adjustments", "Map 3"), ::anno::description("Sets the midpoint from where the contrast will be applied.")]],
+	float map_weight_1 = 1.0f [[::anno::in_group("Weights"), ::anno::description("Scales the resulting opacity of the overlay map 1.")]],
+	float map_weight_2 = 1.0f [[::anno::in_group("Weights"), ::anno::description("Scales the resulting opacity of the overlay map 2.")]],
+	float map_weight_3 = 1.0f [[::anno::in_group("Weights"), ::anno::description("Scales the resulting opacity of the overlay map 3.")]],
+	color overlay_color = color(0.212231f, 0.033105f, 0.012983f) [[::anno::in_group("Blending"), ::anno::description("Select a color to be used in the blending function.")]],
+	uniform ::base::color_layer_mode mode = ::base::color_layer_multiply [[::anno::in_group("Blending"), ::anno::description("Select the blending mode that will be used to composit the overlay color over the input.")]]
+	
+)
+[[
+	::anno::description("Takes a base color and composits an overlay color on top of it using three different overlay maps as masks. "
+						"The contrast and transition of the masks can be adjusted using the 'width' and 'position' controls. "
+						"The blending mode for the compositing operation can be chosen freely.")
+]]
+{
+	float w1 = histogram_scan_big(overlay_map_1, width_1, position_1) * map_weight_1;
+	float w2 = histogram_scan_big(overlay_map_2, width_2, position_2) * map_weight_2;
+	float w3 = histogram_scan_big(overlay_map_3, width_3, position_3) * map_weight_3;
+	
+	::base::texture_return v1 = ::nvidia::core_definitions::blend_colors(input, overlay_color, mode, w1, true);
+	::base::texture_return v2 = ::nvidia::core_definitions::blend_colors(v1.tint, overlay_color, mode, w2, true);
+	return ::nvidia::core_definitions::blend_colors(v2.tint, overlay_color, mode, w3, true).tint;
+}
+
+export material Padang_Dark_Gray(
+	uniform bool infinite_tiling = true [[
+		::anno::description("Enables infinite tiling feature that removes repeating texture patterns. Note that depending on the material this feature changes the appearance of the material slightly."),
+		::anno::display_name("Infinite Tiling"),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(0)
+	]],
+	float diffuse_brightness = 0.5f [[
+		::anno::description("Adjusts the lightness of the material."),
+		::anno::display_name("Brightness"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::soft_range(0.f, 1.f),
+		::anno::ui_order(1)
+	]],
+	float reflection_roughness = 0.81f [[
+		::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+		::anno::display_name("Roughness"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::soft_range(0.f, 1.f),
+		::anno::ui_order(2)
+	]],
+	float bump_strength = 1.0f [[
+		::anno::description("Specifies the strength of the bump."),
+		::anno::display_name("Bump Strength"),
+		::anno::in_group("Appearance"),
+		::anno::soft_range(0.f, 1.f),
+		::anno::hard_range(0.f, 3.f),
+		::anno::ui_order(3)
+	]],
+	uniform float reflection_roughness_dust = 0.8f [[
+		::anno::description("Applies a roughness layer of dust."),
+		::anno::display_name("Dust"),
+		::anno::in_group("Appearance", "Imperfections"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::soft_range(0.f, 1.f),
+		::anno::ui_order(4)
+	]],
+	uniform float reflection_roughness_scratches = .23f [[
+		::anno::description("Applies a roughness layer of scratches."),
+		::anno::display_name("Scratches"),
+		::anno::in_group("Appearance", "Imperfections"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::soft_range(0.f, 1.f),
+		::anno::ui_order(5)
+	]],
+	uniform float reflection_roughness_wear = 0.66f [[
+		::anno::description("Applies a roughness layer of wear."),
+		::anno::display_name("Wear"),
+		::anno::in_group("Appearance", "Imperfections"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::soft_range(0.f, 1.f),
+		::anno::ui_order(6)
+	]],
+	float imperfections_darkening = 0.f [[
+		::anno::description("Applies a darkening effect to the imperfections. The result is a weighted balance of the \"Dust\", \"Scratches\" and \"Wear\" parameters."),
+		::anno::display_name("Imperfections Darkening"),
+		::anno::in_group("Appearance", "Imperfections"),
+		::anno::soft_range(0.f, 1.f),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(7)
+	]],
+	color imperfections_color = color(0.004777f, 0.014444f, 0.043735f) [[
+		::anno::description("The color of the imperfections when \'Imperfections Darkening\' is used."),
+		::anno::display_name("Imperfections Color"),
+		::anno::in_group("Appearance", "Imperfections"),
+		::anno::ui_order(8)
+	]],
+	float imperfections_scale = 0.5f [[
+		::anno::description("This slider scales the dust, scratches and smudges reflection layer."),
+		::anno::display_name("Imperfection Scale"),
+		::anno::in_group("Appearance", "Imperfections"),
+		::anno::soft_range(0.f, 1.f),
+		::anno::ui_order(9)
+	]],
+	uniform bool subsurface_scattering = false [[
+		::anno::description("Enable light that penetrates the surface of a translucent object. While set to True it\'s a physically correct calculated SSS effect. If set to False it\'s a diffuse transmission that is cheaper to perform."),
+		::anno::display_name("Subsurface Scattering"),
+		::anno::in_group("Advanced"),
+		::anno::ui_order(10)
+	]],
+	uniform float translucency_amount = 0.5f [[
+		::anno::description("Describes how far light passes through the material."),
+		::anno::display_name("Translucency Amount"),
+		::anno::in_group("Advanced"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::soft_range(0.f, 1.f),
+		::anno::ui_order(11)
+	]],
+	float2 texture_translate = float2(0.f) [[
+		::anno::description("Controls the position of the texture."),
+		::anno::display_name("Texture Translate"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(12)
+	]],
+	float texture_rotate = 0.f [[
+		::anno::description("Rotates angle of the texture in degrees."),
+		::anno::display_name("Texture Rotate"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(13)
+	]],
+	float2 texture_scale = float2(1.f) [[
+		::anno::description("Larger numbers increase the size."),
+		::anno::display_name("Texture Scale"),
+		::anno::in_group("Transform"),
+		::nvidia::core_definitions::dimension(float2(1.0, 1.0)),
+		::anno::ui_order(14)
+	]],
+	uniform int uv_space_index = 0 [[
+		::anno::description("Uses selected UV space for material."),
+		::anno::display_name("UV Space Index"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(15)
+	]],
+	uniform bool enable_round_corners = false [[
+		::anno::description("Enables the round cornwer effect. Comes at a slight performance cost as additional raytracing calls are required to evaluate the round corner effect."),
+		::anno::display_name("Round Corners"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(16)
+	]],
+	uniform float radius = 1.5f [[
+		::anno::description("Radius of the rounded corners in millimeters (mm)."),
+		::anno::display_name("Radius mm"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(17)
+	]],
+	uniform bool across_materials = false [[
+		::anno::description("Applies the round corner effect across different materials when enabled."),
+		::anno::display_name("Across Materials"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(18)
+	]])
+[[
+	::anno::display_name("Padang Dark Gray - Rough"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::description("Padang stone material with adjustable roughness and imperfections"),
+	::anno::key_words(string[]("stone", "padang", "natural", "interior", "exterior", "wall", "floor", "architecture", "sanitary", "infinite tiling", "rough", "bumped", "matte", "new", "gray", "neutral")), 
+	::anno::thumbnail("./.thumbs/Padang_Dark_Gray.Padang_Dark_Gray.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]]
+ = 
+	let {
+		bool tmp0 = false;
+		
+		texture_2d imperfections_multi_tex = texture_2d("./textures/multi_R_dust_G_scratches_B_smudges.jpg", ::tex::gamma_linear);
+		texture_2d multi_tex = texture_2d("./textures/padang_dark_grey_multi_R_rough_G_ao_B_height.jpg", ::tex::gamma_linear);
+		texture_2d SSS_lin_tex = texture_2d("./textures/padang_dark_grey_SSS.jpg", ::tex::gamma_linear);
+		texture_2d SSS_srgb_tex = texture_2d("./textures/padang_dark_grey_SSS.jpg", ::tex::gamma_srgb);
+		texture_2d diff_lin_tex = texture_2d("./textures/padang_dark_grey_diff.jpg", ::tex::gamma_linear);
+		texture_2d diff_srgb_tex = texture_2d("./textures/padang_dark_grey_diff.jpg", ::tex::gamma_srgb);
+		texture_2d norm_tex = texture_2d("./textures/padang_dark_grey_norm.jpg", ::tex::gamma_linear);
+		
+		material_surface tmp1(::df::custom_curve_layer(0.0399999991f, 1.f, 5.f, 1.f, ::df::weighted_layer(::math::pow(histogram_scan_big(float3(infinite_tiling ? color(vm_tex_infinite(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), float3(0.117647f, 0.168626994f, 0.309803993f), 0.75f, false, 2.20000005f)) : vm_tex_lookup(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), mono_a, float4(1.f)).tint).x, 0.419999987f, 0.379999995f), 2.20000005f), ::df::microfacet_ggx_smith_bsdf((reflection_roughness * 0.409999996f + 0.200000003f) * (reflection_roughness * 0.409999996f + 0.200000003f), (reflection_roughness * 0.409999996f + 0.200000003f) * (reflection_roughness * 0.409999996f + 0.200000003f), color(1.f, 1.f, 1.f), color(0.f, 0.f, 0.f), ::state::texture_tangent_u(0), ::df::scatter_reflect), ::df::microfacet_ggx_smith_bsdf((::math::max(::math::max(float3(infinite_tiling ? color(vm_tex_infinite(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), float3(0.117647f, 0.168626994f, 0.309803993f), 0.75f, false, 2.20000005f)) : vm_tex_lookup(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), mono_a, float4(1.f)).tint).x * (reflection_roughness_dust * 2.f), float3(infinite_tiling ? color(vm_tex_infinite(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), float3(0.117647f, 0.168626994f, 0.309803993f), 0.75f, false, 2.20000005f)) : vm_tex_lookup(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), mono_a, float4(1.f)).tint).y * (reflection_roughness_scratches * 2.f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), float3(0.117647f, 0.168626994f, 0.309803993f), 0.75f, false, 2.20000005f)) : vm_tex_lookup(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), mono_a, float4(1.f)).tint).z, 1.78999996f) * (reflection_roughness_wear * 2.f)) + histogram_range(::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(multi_tex, vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float3(0.690195978f, 0.600000024f, 0.87450999f), 1.f, false, 2.20000005f)) : vm_tex_lookup(multi_tex, vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), mono_a, float4(1.f)).tint)[0], 2.20000005f), 1.f, ::math::lerp(bump_strength * 0.300000012f, 0.850000024f, reflection_roughness))) * (::math::max(::math::max(float3(infinite_tiling ? color(vm_tex_infinite(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), float3(0.117647f, 0.168626994f, 0.309803993f), 0.75f, false, 2.20000005f)) : vm_tex_lookup(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), mono_a, float4(1.f)).tint).x * (reflection_roughness_dust * 2.f), float3(infinite_tiling ? color(vm_tex_infinite(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), float3(0.117647f, 0.168626994f, 0.309803993f), 0.75f, false, 2.20000005f)) : vm_tex_lookup(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), mono_a, float4(1.f)).tint).y * (reflection_roughness_scratches * 2.f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), float3(0.117647f, 0.168626994f, 0.309803993f), 0.75f, false, 2.20000005f)) : vm_tex_lookup(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), mono_a, float4(1.f)).tint).z, 1.78999996f) * (reflection_roughness_wear * 2.f)) + histogram_range(::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(multi_tex, vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float3(0.690195978f, 0.600000024f, 0.87450999f), 1.f, false, 2.20000005f)) : vm_tex_lookup(multi_tex, vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), mono_a, float4(1.f)).tint)[0], 2.20000005f), 1.f, ::math::lerp(bump_strength * 0.300000012f, 0.850000024f, reflection_roughness))), (::math::max(::math::max(float3(infinite_tiling ? color(vm_tex_infinite(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), float3(0.117647f, 0.168626994f, 0.309803993f), 0.75f, false, 2.20000005f)) : vm_tex_lookup(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), mono_a, float4(1.f)).tint).x * (reflection_roughness_dust * 2.f), float3(infinite_tiling ? color(vm_tex_infinite(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), float3(0.117647f, 0.168626994f, 0.309803993f), 0.75f, false, 2.20000005f)) : vm_tex_lookup(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), mono_a, float4(1.f)).tint).y * (reflection_roughness_scratches * 2.f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), float3(0.117647f, 0.168626994f, 0.309803993f), 0.75f, false, 2.20000005f)) : vm_tex_lookup(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), mono_a, float4(1.f)).tint).z, 1.78999996f) * (reflection_roughness_wear * 2.f)) + histogram_range(::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(multi_tex, vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float3(0.690195978f, 0.600000024f, 0.87450999f), 1.f, false, 2.20000005f)) : vm_tex_lookup(multi_tex, vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), mono_a, float4(1.f)).tint)[0], 2.20000005f), 1.f, ::math::lerp(bump_strength * 0.300000012f, 0.850000024f, reflection_roughness))) * (::math::max(::math::max(float3(infinite_tiling ? color(vm_tex_infinite(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), float3(0.117647f, 0.168626994f, 0.309803993f), 0.75f, false, 2.20000005f)) : vm_tex_lookup(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), mono_a, float4(1.f)).tint).x * (reflection_roughness_dust * 2.f), float3(infinite_tiling ? color(vm_tex_infinite(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), float3(0.117647f, 0.168626994f, 0.309803993f), 0.75f, false, 2.20000005f)) : vm_tex_lookup(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), mono_a, float4(1.f)).tint).y * (reflection_roughness_scratches * 2.f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), float3(0.117647f, 0.168626994f, 0.309803993f), 0.75f, false, 2.20000005f)) : vm_tex_lookup(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), mono_a, float4(1.f)).tint).z, 1.78999996f) * (reflection_roughness_wear * 2.f)) + histogram_range(::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(multi_tex, vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float3(0.690195978f, 0.600000024f, 0.87450999f), 1.f, false, 2.20000005f)) : vm_tex_lookup(multi_tex, vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), mono_a, float4(1.f)).tint)[0], 2.20000005f), 1.f, ::math::lerp(bump_strength * 0.300000012f, 0.850000024f, reflection_roughness))), color(1.f, 1.f, 1.f), color(0.f, 0.f, 0.f), ::state::texture_tangent_u(0), ::df::scatter_reflect), ::state::normal()), ::df::weighted_layer(translucency_amount * 0.5f, ::df::diffuse_transmission_bsdf(nvidia::core_definitions::blend_colors(infinite_tiling ? color(vm_tex_infinite(SSS_lin_tex, vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float3(0.815999985f, 0.773999989f, 0.72299999f), 1.f, true, 2.20000005f)) : vm_tex_lookup(SSS_srgb_tex, vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), mono_a, float4(1.f)).tint, color(0.900943995f, 0.831785977f, 0.727770984f), ::base::color_layer_blend, 0.200000003f, true).tint), ::df::diffuse_reflection_bsdf(vm_comp_dirt_overlay_3x(::math::pow(infinite_tiling ? color(vm_tex_infinite_color_normal(diff_lin_tex, norm_tex, vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float3(0.470587999f, 0.435294002f, 0.384314001f), float3(0.498039007f, 0.498039007f, 0.976471126f), 1.f, true, 2.20000005f, bump_strength * 2.f).value) : vm_tex_lookup(diff_srgb_tex, vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), mono_a, float4(1.f)).tint, diffuse_brightness * -1.f + 1.5f), float3(infinite_tiling ? color(vm_tex_infinite(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), float3(0.117647f, 0.168626994f, 0.309803993f), 0.75f, false, 2.20000005f)) : vm_tex_lookup(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), mono_a, float4(1.f)).tint).x, float3(infinite_tiling ? color(vm_tex_infinite(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), float3(0.117647f, 0.168626994f, 0.309803993f), 0.75f, false, 2.20000005f)) : vm_tex_lookup(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), mono_a, float4(1.f)).tint).y, float3(infinite_tiling ? color(vm_tex_infinite(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), float3(0.117647f, 0.168626994f, 0.309803993f), 0.75f, false, 2.20000005f)) : vm_tex_lookup(imperfections_multi_tex, vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float2(imperfections_scale * 12.f)), mono_a, float4(1.f)).tint).z, 0.280000001f, 0.329999983f, 0.109999999f, 0.289999992f, 0.25f, 0.429999977f, vm_util_balanced_weight(reflection_roughness_dust, reflection_roughness_scratches, reflection_roughness_wear, ::math::pow(imperfections_darkening, 0.449999988f) * 0.899999976f, ::math::pow(imperfections_darkening, 0.449999988f) * 0.899999976f, ::math::pow(imperfections_darkening, 0.449999988f) * 0.899999976f).x, vm_util_balanced_weight(reflection_roughness_dust, reflection_roughness_scratches, reflection_roughness_wear, ::math::pow(imperfections_darkening, 0.449999988f) * 0.899999976f, ::math::pow(imperfections_darkening, 0.449999988f) * 0.899999976f, ::math::pow(imperfections_darkening, 0.449999988f) * 0.899999976f).y, vm_util_balanced_weight(reflection_roughness_dust, reflection_roughness_scratches, reflection_roughness_wear, ::math::pow(imperfections_darkening, 0.449999988f) * 0.899999976f, ::math::pow(imperfections_darkening, 0.449999988f) * 0.899999976f, ::math::pow(imperfections_darkening, 0.449999988f) * 0.899999976f).z, imperfections_color, ::base::color_layer_multiply), 0.5f), infinite_tiling ? vm_tex_infinite_color_normal(diff_lin_tex, norm_tex, vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float3(0.470587999f, 0.435294002f, 0.384314001f), float3(0.498039007f, 0.498039007f, 0.976471126f), 1.f, true, 2.20000005f, bump_strength * 2.f).norm : vm_tex_normal_lookup(norm_tex, vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), bump_strength * 2.f)), infinite_tiling ? vm_tex_infinite_color_normal(diff_lin_tex, norm_tex, vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), float3(0.470587999f, 0.435294002f, 0.384314001f), float3(0.498039007f, 0.498039007f, 0.976471126f), 1.f, true, 2.20000005f, bump_strength * 2.f).norm : vm_tex_normal_lookup(norm_tex, vm_coord(texture_translate, texture_rotate, texture_scale * 0.200000003f, uv_space_index), bump_strength * 2.f)), material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		material_surface tmp2 = material_surface(scattering: bsdf(), emission: material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		color tmp3 = color(1.f, 1.f, 1.f);
+		material_volume tmp4 = subsurface_scattering ? material_volume(vdf(), volume_transmittance_albedo(16.f, color(0.254152f, 0.197984993f, 0.146557003f), color(0.921581984f, 0.921581984f, 0.921581984f)).absorption_coefficient, volume_transmittance_albedo(16.f, color(0.254152f, 0.197984993f, 0.146557003f), color(0.921581984f, 0.921581984f, 0.921581984f)).scattering_coefficient, color(0.f, 0.f, 0.f)) : material_volume(scattering: vdf(), absorption_coefficient: color(0.f, 0.f, 0.f), scattering_coefficient: color(0.f, 0.f, 0.f), emission_intensity: color(0.f, 0.f, 0.f));
+		material_geometry tmp5(float3(0.f), 1.f, enable_round_corners ? ::state::rounded_corner_normal(radius * 0.00100000005f, across_materials, 1.f) : ::state::normal());
+		hair_bsdf tmp6 = hair_bsdf();
+	} in
+		material(
+			thin_walled: tmp0,
+			surface: tmp1,
+			backface: tmp2,
+			ior: tmp3,
+			volume: tmp4,
+			geometry: tmp5,
+			hair: tmp6);
+
+// 2
+export material Padang_Dark_Gray_Polished(*) 
+[[
+	::anno::display_name("Padang Dark Gray - Polished"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::description("Padang stone material with adjustable roughness and imperfections"),
+	::anno::key_words(string[]("stone", "padang", "natural", "interior", "exterior", "wall", "floor", "architecture", "sanitary", "infinite tiling", "polished", "smooth", "shiny", "new", "gray", "neutral", "dark")), 
+	::anno::thumbnail("./.thumbs/Padang_Dark_Gray.Padang_Dark_Gray_Polished.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] = Padang_Dark_Gray(
+	infinite_tiling:			true,
+	diffuse_brightness:			0.5f,
+	reflection_roughness:		0.07f,
+	bump_strength:				0.0f,
+	imperfections_scale:		0.5f,
+	reflection_roughness_dust:	0.1f,
+	reflection_roughness_scratches:0.03f,
+	reflection_roughness_wear:	0.03f,
+	imperfections_darkening:	0.00f,
+	imperfections_color:		color(0.004777f, 0.014444f, 0.043735f),
+	subsurface_scattering:		true,
+	translucency_amount:		0.5f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	uv_space_index:				0,
+	enable_round_corners:		false,
+	radius:						1.5f,
+	across_materials:			false
+);
+
+
+// 3
+export material Padang_Dark_Gray_Polished_Imperfections(*) 
+[[
+	::anno::display_name("Padang Dark Gray - Polished Imperfections"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::description("Padang stone material with adjustable roughness and imperfections"),
+	::anno::key_words(string[]("stone", "padang", "natural", "interior", "exterior", "wall", "floor", "architecture", "sanitary", "infinite tiling", "polished", "matte", "smooth", "imperfections", "smudged", "smudges", "used", "gray", "neutral", "dark")), 
+	::anno::thumbnail("./.thumbs/Padang_Dark_Gray.Padang_Dark_Gray_Polished_Imperfections.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] = Padang_Dark_Gray(
+	infinite_tiling:			true,
+	diffuse_brightness:			0.5f,
+	reflection_roughness:		0.07f,
+	bump_strength:				0.0f,
+	imperfections_scale:		0.5f,
+	reflection_roughness_dust:	0.53f,
+	reflection_roughness_scratches:0.44f,
+	reflection_roughness_wear:	0.92f,
+	imperfections_darkening:	0.09f,
+	imperfections_color:		color(0.004777f, 0.014444f, 0.043735f),
+	subsurface_scattering:		true,
+	translucency_amount:		0.5f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	uv_space_index:				0,
+	enable_round_corners:		false,
+	radius:						1.5f,
+	across_materials:			false
+);
+
+
+// 4
+export material Padang_Dark_Gray_Worn(*) 
+[[
+	::anno::display_name("Padang Dark Gray - Worn"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::description("Padang stone material with adjustable roughness and imperfections"),
+	::anno::key_words(string[]("stone", "padang", "natural", "interior", "exterior", "wall", "floor", "architecture", "sanitary", "infinite tiling", "matte", "rough", "imperfections", "old", "worn", "dirty", "dirt", "gray", "neutral", "dark")), 
+	::anno::thumbnail("./.thumbs/Padang_Dark_Gray.Padang_Dark_Gray_Worn.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] = Padang_Dark_Gray(
+	infinite_tiling:			true,
+	diffuse_brightness:			0.5f,
+	reflection_roughness:		0.81f,
+	bump_strength:				1.0f,
+	imperfections_scale:		0.5f,
+	reflection_roughness_dust:	0.47f,
+	reflection_roughness_scratches:0.23f,
+	reflection_roughness_wear:	1.0f,
+	imperfections_darkening:	1.00f,
+	imperfections_color:		color(0.004777f, 0.014444f, 0.043735f),
+	subsurface_scattering:		true,
+	translucency_amount:		0.5f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	uv_space_index:				0,
+	enable_round_corners:		false,
+	radius:						1.5f,
+	across_materials:			false
+);
+
+
+// 5
+export material Padang_Dark_Gray_Polished_Bright(*) 
+[[
+	::anno::display_name("Padang Dark Gray - Polished Bright"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::description("Padang stone material with adjustable roughness and imperfections"),
+	::anno::key_words(string[]("stone", "padang", "natural", "interior", "exterior", "wall", "floor", "architecture", "sanitary", "infinite tiling", "polished", "smooth", "shiny", "new", "gray", "neutral", "bright")), 
+	::anno::thumbnail("./.thumbs/Padang_Dark_Gray.Padang_Dark_Gray_Polished_Bright.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] = Padang_Dark_Gray(
+	infinite_tiling:			true,
+	diffuse_brightness:			0.5f,
+	reflection_roughness:		0.04f,
+	bump_strength:				0.03f,
+	imperfections_scale:		0.5f,
+	reflection_roughness_dust:	0.94f,
+	reflection_roughness_scratches:0.06f,
+	reflection_roughness_wear:	0.03f,
+	imperfections_darkening:	0.00f,
+	imperfections_color:		color(0.004777f, 0.014444f, 0.043735f),
+	subsurface_scattering:		true,
+	translucency_amount:		0.5f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	uv_space_index:				0,
+	enable_round_corners:		false,
+	radius:						1.5f,
+	across_materials:			false
+);

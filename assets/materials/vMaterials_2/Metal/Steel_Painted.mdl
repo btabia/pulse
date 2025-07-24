@@ -1,0 +1,1177 @@
+/******************************************************************************
+ *	 Copyright 2024 NVIDIA Corporation. All rights reserved.	 *
+ ******************************************************************************
+
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA's Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL,
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+mdl 1.7;
+
+import ::state::*;
+import ::anno::*;
+import ::base::*;
+import ::df::*;
+import ::math::*;
+import ::tex::*;
+import ::nvidia::core_definitions::blend_colors;
+import ::nvidia::core_definitions::dimension;
+
+const string COPYRIGHT =
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n"
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n"
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+const string DESCRIPTION = "A painted steel material with dirt and weathering effects as well as optional damages and paint artifacts.";
+
+
+float remap_xy_to_0_1(float input, float x, float y)
+{
+	return (input - x)/(y - x);
+}
+
+struct vm_coordinates{
+	float2 uv;			// UV coordinates stored as a simple float2
+	float rotation;		// The rotation is stored in radiands (not degress), to convert use ((rotation* 3.1415926535897932384626433832f) / 180.f)
+	int uv_space_index;	// The UV space Index from which the UV data came from
+	float4 carry;		// may carry additional data, such as random IDs
+};
+
+enum vm_mono_select 
+[[
+    anno::description("Modes for the creation of a gray-scale value from a color."),
+    anno::hidden()
+]]
+{
+	mono_r = 0,
+	mono_g = 1,
+	mono_b = 2,
+	mono_a = 3,
+	mono_average = 4
+};
+
+vm_coordinates vm_coord
+(
+	float2 translation	= float2(0.0f, 0.0) [[
+		::anno::display_name("Translation"),
+		::anno::description("Translates the coordinates.")
+	]],
+	float rotation 		= 0.0f [[
+		::anno::display_name("Rotation"),
+		::anno::description("Rotates the coordinates in degrees.")
+	]],
+	float2 scaling		= float2(1.0f, 1.0f) [[
+		::anno::display_name("Scaling"),
+		::anno::description("Scales the coordinates.")
+	]],	
+	uniform int uv_space = 0 [[
+		::anno::display_name("UV Space"),
+		::anno::description("Chose the UV space.")
+	]]
+)
+[[
+		::anno::display_name("vm Transform"),
+		::anno::description("Generates coordinates to be used in vm_lookup functions.")
+]]
+{
+	vm_coordinates uv;
+	::base::texture_coordinate_info info = ::base::coordinate_source( ::base::texture_coordinate_uvw, uv_space);
+	uv.rotation = (rotation * 3.1415926535897932384626433832f) / 180.f;
+	uv.uv = float2(info.position.x, info.position.y);
+	float sine   = ::math::sin(uv.rotation);
+	float cosine = ::math::cos(uv.rotation);
+	float2x2 rot = float2x2(cosine, -sine, sine, cosine);
+	uv.uv = rot * uv.uv;
+	uv.uv /= scaling;
+	uv.uv += translation;
+	// Translation before or after rotation?
+	return uv;
+}
+
+vm_coordinates vm_coord_post_scale(
+	vm_coordinates uv = vm_coord(),
+	float2 scale = float2(1.0f)
+)
+{
+	uv.uv /= scale;
+	return uv;
+}
+
+::base::texture_return vm_tex_lookup(
+	uniform texture_2d tex,
+	vm_coordinates uv = vm_coord(),
+	uniform vm_mono_select mono_source = mono_a,
+	float4 scale = float4(1.0f))
+{
+	float mono;
+	float4 lookup = ::tex::lookup_float4(tex, uv.uv, ::tex::wrap_repeat, ::tex::wrap_repeat) * scale;
+	switch( mono_source ) {
+		case mono_r: mono = lookup.x;
+			break;
+		case mono_g: mono = lookup.y;
+			break;
+		case mono_b: mono = lookup.z;
+			break;
+		case mono_a: mono = lookup.w;
+			break;
+		case mono_average: mono = ::math::average(float3(lookup.x, lookup.y, lookup.z));
+			break;
+	}
+	return ::base::texture_return(color(lookup.x, lookup.y, lookup.z), mono);
+}
+
+float3 vm_tex_normal_lookup(
+	uniform texture_2d tex,
+	vm_coordinates uv = vm_coord(),
+	float strength = 1.0f
+)
+{
+	float rot = uv.rotation;
+	// Lookup and convert normal texture to -1 ... 1 range
+	float3 norm = (::tex::lookup_float3(tex, uv.uv, ::tex::wrap_repeat, ::tex::wrap_repeat) - float3(.5f)) * 2.0f;
+	norm = ::math::normalize(norm * float3(strength, strength, 1.0));
+	// if any rotation happened prior to the lookup, compensate for it
+	norm = float3(::math::cos(rot) * norm.x - ::math::sin(rot) * norm.y,
+					::math::sin(rot) * norm.x + ::math::cos(rot) * norm.y,
+					norm.z);
+	return norm.x * ::state::texture_tangent_u(uv.uv_space_index) +
+			norm.y * ::state::texture_tangent_v(uv.uv_space_index) +
+			norm.z * ::state::normal();
+}
+
+
+
+float3 vm_tex_normal_lookup_2x(
+	uniform texture_2d tex_a,
+	uniform texture_2d tex_b,
+	vm_coordinates uv_a = vm_coord(),
+	vm_coordinates uv_b = vm_coord(),
+	float strength_a = 1.0f,
+	float strength_b = 1.0f,
+	bool use_coord_a_only = false	// when set to 'false, tex_b share coordinates from 'uv_a'
+)
+{
+	float rot_a = uv_a.rotation;
+	float rot_b = use_coord_a_only ? uv_a.rotation : uv_b.rotation;
+	uv_b.uv = use_coord_a_only ? uv_a.uv : uv_b.uv;
+	
+	// Lookup and convert normal textures a and b to -1 ... 1 range
+	float3 norm_a = (::tex::lookup_float3(tex_a, uv_a.uv, ::tex::wrap_repeat, ::tex::wrap_repeat) - float3(.5f)) * 2.0f;
+	norm_a = ::math::normalize(norm_a * float3(strength_a, strength_a, 1.0));
+	float3 norm_b = (::tex::lookup_float3(tex_b, uv_b.uv, ::tex::wrap_repeat, ::tex::wrap_repeat) - float3(.5f)) * 2.0f;
+	norm_b = ::math::normalize(norm_b * float3(strength_b, strength_b, 1.0));
+	
+	// if any rotation happened prior to the lookup, compensate for it
+	norm_a = float3(::math::cos(rot_a) * norm_a.x - ::math::sin(rot_a) * norm_a.y,
+					::math::sin(rot_a) * norm_a.x + ::math::cos(rot_a) * norm_a.y,
+					norm_a.z);
+	norm_b = float3(::math::cos(rot_b) * norm_b.x - ::math::sin(rot_b) * norm_b.y,
+					::math::sin(rot_b) * norm_b.x + ::math::cos(rot_b) * norm_b.y,
+					norm_b.z);
+	
+	// http://blog.selfshadow.com/publications/blending-in-detail/
+	norm_a=norm_a + float3(0.,0.,1.);
+    norm_b = norm_b *  float3(-1.,-1.,1.);
+    float3 norm = norm_a*math::dot(norm_a, norm_b)/norm_a.z - norm_b;
+	
+	return norm.x * ::state::texture_tangent_u(uv_a.uv_space_index) +
+			norm.y * ::state::texture_tangent_v(uv_a.uv_space_index) +
+			norm.z * ::state::normal();
+}
+
+float2x2 invert_2x2(float2x2 M)
+{
+	float det = M[0][0]*M[1][1] - M[0][1]*M[1][0];
+	//https://www.chilimath.com/lessons/advanced-algebra/inverse-of-a-2x2-matrix/
+	return (1.0 / det) * float2x2(M[1][1], -M[0][1], -M[1][0], M[0][0]);
+}
+
+
+float3 rgb2srgb(float3 val) [[ anno::unused() ]] {
+    return ::math::pow( ::math::max(val, float3(0.f)), float3(1./2.2) );
+}
+
+float uint2float(int x)
+{
+    return float(x & 0x7FFFFFFF) + (x < 0 ? 2147483648.0 : 0.0);
+}
+
+int lowbias32(int x)
+{
+    x ^= x >>> 16;
+    x *= 0x7feb352d;
+    x ^= x >>> 15;
+    x *= 0x846ca68b;
+    x ^= x >>> 16;
+    return x;
+}
+
+float2 rnd22(int2 p) {
+	float2 ret_val = float2(
+		uint2float(lowbias32(p[0] + lowbias32(p[1]))) / 4294967296.f,
+		uint2float(lowbias32(p[0] + 32000 + lowbias32(p[1]))) / 4294967296.f
+	);
+    return ret_val;
+}    
+
+
+
+
+float3 vm_tex_infinite(
+	uniform texture_2d tex = texture_2d(),
+	vm_coordinates uv = vm_coord(),
+	float3 average_color = float3(0.5f, 0.5f, .5f),
+	float patch_size = 1.0,
+	bool gamma_correct = true,
+	float gamma = 2.2f
+)
+{
+	float2 uv_in = uv.uv;
+	
+	float3 O = float3(0.f);
+	float2x2 M0 = float2x2(1.f,0.f, 0.5f, ::math::sqrt(3.f)/2.f);
+	float2x2 M = invert_2x2(M0); // transform matrix <-> tilted space
+	
+	float2 U = uv_in;
+	float2 V = M * (uv.uv / patch_size); //pre-tilted hexa coordinates
+	int2 I = int2(::math::floor(V))+int2(935); // hexa-tile id
+	
+	// The mean color needs to be determined in Photoshop then to make the
+	// average color work out, take the float value and calculate the apropriate
+	// mean value as (value^(1/2.2))
+
+	float3 m = average_color;
+	
+	float3 F = float3(::math::frac(V)[0], ::math::frac(V)[1], 0.f), W;
+	F[2] = 1.0 - F[0] - F[1]; // local hexa coordinates
+	
+	if( F[2] > 0.f )
+		O = (W[0] = F[2]) * (( ::tex::lookup_float3(tex, U-rnd22(I))) - m)
+		  + (W[1] = F[1]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(0,1)))) - m)
+		  + (W[2] = F[0]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(1,0)))) - m);
+	else
+		O = (W[0] =      -F[2]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(1))))   - m)
+	      + (W[1] = 1.f - F[1]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(1, 0)))) - m)
+		  + (W[2] = 1.f - F[0]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(0, 1)))) - m);
+	O = m + O/::math::length(W);
+	O = ::math::clamp( (O), 0.0f, 1.0f);
+	
+	return gamma_correct? ::math::pow(::math::max(O, float3(0.0f)), gamma) : float3(O);
+}
+
+float3 vm_tex_infinite_normal(
+	uniform texture_2d tex = texture_2d(),
+	vm_coordinates uv = vm_coord(),
+	float3 average_color = float3(0.5f),
+	float patch_size = 1.0,
+	float normal_strength = 1.0
+)
+{
+	float2 uv_in = uv.uv;
+	
+	float3 O = float3(0.f);
+	float2x2 M0 = float2x2(1.f,0.f, 0.5f, ::math::sqrt(3.f)/2.f);
+	float2x2 M = invert_2x2(M0); // transform matrix <-> tilted space
+	
+	float2 U = uv_in;
+	float2 V = M * (uv.uv / patch_size); //pre-tilted hexa coordinates
+	int2 I = int2(::math::floor(V))+int2(935); // hexa-tile id
+	
+	// The mean color needs to be determined in Photoshop then to make the
+	// average color work out, take the float value and calculate the apropriate
+	// mean value as (value^(1/2.2))
+
+	float3 m = average_color;
+
+	float3 F = float3(::math::frac(V)[0], ::math::frac(V)[1], 0.f), W;
+	F[2] = 1.0 - F[0] - F[1]; // local hexa coordinates
+	
+	if( F[2] > 0.f )
+		O = (W[0] = F[2]) * (( ::tex::lookup_float3(tex, U-rnd22(I))) - m)
+		  + (W[1] = F[1]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(0,1)))) - m)
+		  + (W[2] = F[0]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(1,0)))) - m);
+	else
+		O = (W[0] =      -F[2]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(1))))   - m)
+	      + (W[1] = 1.f - F[1]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(1, 0)))) - m)
+		  + (W[2] = 1.f - F[0]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(0, 1)))) - m);
+	O = m + O/::math::length(W);
+	O = ::math::clamp( (O), 0.0, 1.0);
+	
+	float3 norm = (O - float3(.5f)) * 2.0f;
+	norm = ::math::normalize(norm * float3(normal_strength, normal_strength, 1.0));
+	// if any rotation happened prior to the lookup, compensate for it
+	norm = float3(::math::cos(uv.rotation) * norm.x - ::math::sin(uv.rotation) * norm.y,
+					::math::sin(uv.rotation) * norm.x + ::math::cos(uv.rotation) * norm.y,
+					norm.z);
+	return norm.x * ::state::texture_tangent_u(uv.uv_space_index) +
+			norm.y * ::state::texture_tangent_v(uv.uv_space_index) +
+			norm.z * ::state::normal();	
+}
+
+
+
+// -----------------------------------------------------------------
+
+float screen(float base, float layer, float weight)
+{
+	return base + (1.0f - base) * layer * weight;
+}
+
+float histogram_scan_big(float input, float width, float position)
+{
+	return ::math::clamp(
+				remap_xy_to_0_1(input,
+								::math::lerp(-width, 1.0, position),
+								position * (1.0 + width)), // special case of ::math::lerp(0.0, 1.0 + width, position)),
+				0.0,
+				1.0);
+}
+
+float histogram_range(float input, float range = 1.0f, float position = 0.5f)
+{	
+	float low = ::math::clamp(1.0 - ::math::min(((1.0 - position) + range * 0.5), (1.0 - position) * 2), 0.0, 1.0);
+	float high = ::math::clamp(math::min((position + range * 0.5 ), position * 2.0), 0.0, 1.0);
+	return ::math::lerp(low, high, input);
+}
+
+// Returns the normal n in tangent space, given n is in internal space.
+float3 transform_internal_to_tangent(float3 n)
+[[ 
+    anno::hidden() 
+]]
+{
+    return
+        n.x* float3(state::texture_tangent_u(0).x,state::texture_tangent_v(0).x,state::normal().x)+
+        n.y* float3(state::texture_tangent_u(0).y,state::texture_tangent_v(0).y,state::normal().y)+
+        n.z* float3(state::texture_tangent_u(0).z,state::texture_tangent_v(0).z,state::normal().z);
+}
+
+// Returns the normal n in internal space, given n is in tangent space.
+float3 transform_tangent_to_internal(float3 n)
+[[ 
+    anno::hidden() 
+]]
+{
+    return  state::texture_tangent_u(0) * n.x +
+            state::texture_tangent_v(0) * n.y +
+            state::normal() * n.z ;
+}
+
+
+
+// Returns a normal by adding a detail normal to a global normal.
+// If detail blending of two normal maps gives visual artifacts, check if texture_2d are loaded
+// correctly with tex::gamma_linear
+float3 add_detail_normal(float3 nd = state::normal(), float3 n = state::normal())
+{
+    // http://blog.selfshadow.com/publications/blending-in-detail/
+    float3 n_t = transform_internal_to_tangent(n);
+    float3 nd_t = transform_internal_to_tangent(nd);
+
+    n_t=n_t + float3(0.,0.,1.);
+    nd_t = nd_t *  float3(-1.,-1.,1.);
+    n = n_t*math::dot(n_t, nd_t)/n_t.z - nd_t;
+    return ::math::normalize(transform_tangent_to_internal(n));
+}
+
+export material Steel_Painted(
+    uniform bool infinite_tiling = false [[
+        ::anno::description("Enables infinite tiling feature which removes repeating texture patterns. Note that depending on the material this feature changes the appearance of the material slightly."),
+        ::anno::display_name("Infinite Tiling"),
+        ::anno::in_group("Appearance"),
+        ::anno::ui_order(0)
+    ]],
+    color paint_color = color(0.491021f, 0.318547f, 0.024158f) [[
+        ::anno::description("Choose the color of the paint."),
+        ::anno::display_name("Paint Color"),
+        ::anno::in_group("Appearance"),
+        ::anno::ui_order(1)
+    ]],
+    float paint_roughness = 0.16f [[
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::display_name("Paint Roughness"),
+        ::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 1.f),
+        ::anno::soft_range(0.f, 1.f),
+        ::anno::ui_order(2)
+    ]],
+    float paint_roughness_variation = 0.1f [[
+        ::anno::description("Amount of variation applied to the roughness, higher numbers lead to non-uniform reflections of the material."),
+        ::anno::display_name("Paint Roughness Variation"),
+        ::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 1.f),
+        ::anno::soft_range(0.f, 1.f),
+        ::anno::ui_order(3)
+    ]],
+    float dirt_weight = 0.04f [[
+        ::anno::description("Adjusts the amount of dirty stains on the surface."),
+        ::anno::display_name("Dirt Weight"),
+        ::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 1.f),
+        ::anno::soft_range(0.f, 1.f),
+        ::anno::ui_order(4)
+    ]],
+    float wash_weight = 0.0f [[
+        ::anno::description("Adjusts the amount of washed dirty stains on the paint."),
+        ::anno::display_name("Wash Dirt Weight"),
+        ::anno::in_group("Appearance"),
+        ::anno::soft_range(0.f, 1.f),
+        ::anno::hard_range(0.f, 1.f),
+        ::anno::ui_order(5)
+    ]],
+    float paint_stroke_normal_strength = 0.2f [[
+        ::anno::description("Specifies the strength of the bump that shows the paint strokes."),
+        ::anno::display_name("Paint Stroke Normal Strength"),
+        ::anno::in_group("Appearance"),
+        ::anno::soft_range(0.f, 1.f),
+        ::anno::hard_range(0.f, 1.f),
+        ::anno::ui_order(6)
+    ]],
+    float uneven_normal_strength = 0.2f [[
+        ::anno::description("Specifies the strength of the bump that shows signs of being aleady overpainted."),
+        ::anno::display_name("Overpaint Normal Strength"),
+        ::anno::in_group("Appearance"),
+        ::anno::soft_range(0.f, 1.f),
+        ::anno::hard_range(0.f, 1.f),
+        ::anno::ui_order(7)
+    ]],
+    uniform bool enable_rust_damage = false [[
+        ::anno::description("Enables the damaged rust spots."),
+        ::anno::display_name("Enable Rust Damage"),
+        ::anno::in_group("Appearance", "Damage"),
+        ::anno::ui_order(8)
+    ]],
+    float bare_metal_darkness = 0.65f [[
+        ::anno::description("Adjusts the brightness of the bare metal where the paint has peeled away."),
+        ::anno::display_name("Bare Metal Darkness"),
+        ::anno::in_group("Appearance", "Damage"),
+        ::anno::hard_range(0.f, 1.f),
+        ::anno::soft_range(0.f, 1.f),
+        ::anno::ui_order(9)
+    ]],
+    float damages_scale = 1.f [[
+        ::anno::description("Adjusts the size of the damages."),
+        ::anno::display_name("Damages Scale"),
+        ::anno::in_group("Appearance", "Damage"),
+        ::anno::hard_range(0.f, 1.f),
+        ::anno::soft_range(0.f, 1.f),
+        ::anno::ui_order(10)
+    ]],
+    float2 texture_translate = float2(0.f) [[
+        ::anno::description("Controls the position of the texture."),
+        ::anno::display_name("Texture Translate"),
+        ::anno::in_group("Transform"),
+        ::anno::ui_order(11)
+    ]],
+    float texture_rotate = 0.f [[
+        ::anno::description("Rotates angle of the texture in degrees."),
+        ::anno::display_name("Texture Rotate"),
+        ::anno::in_group("Transform"),
+        ::anno::soft_range(0.f, 360.f),
+        ::anno::ui_order(12)
+    ]],
+    float2 texture_scale = float2(1.f) [[
+        ::anno::description("Larger numbers increase the size."),
+        ::anno::display_name("Texture Scale"),
+        ::anno::in_group("Transform"),
+		::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+        ::anno::ui_order(13)
+    ]],
+    uniform int uv_space_index = 0 [[
+        ::anno::description("Uses selected UV space for material."),
+        ::anno::display_name("UV Space Index"),
+        ::anno::in_group("Transform"),
+        ::anno::ui_order(14)
+    ]],
+    uniform bool roundcorners_enable = false [[
+        ::anno::description("Enables the round corner effect. Comes at a slight performance cost as additional raytracing calls are required to evaluate the round corner effect."),
+        ::anno::display_name("Enable Round Corners"),
+        ::anno::in_group("Round Corners"),
+        ::anno::ui_order(15)
+    ]],
+    uniform float roundcorners_radius_mm = 0.5f [[
+        ::anno::description("Radius of the rounded corners in millimeters."),
+        ::anno::display_name("Round Corner Radius (mm)"),
+        ::anno::in_group("Round Corners"),
+        ::anno::soft_range(0.f, 10.f),
+        ::anno::ui_order(16)
+    ]],
+    uniform bool roundcorners_across_materials = false [[
+        ::anno::description("Applies the round corner effect across different materials when enabled."),
+        ::anno::display_name("Across Materials"),
+        ::anno::in_group("Round Corners"),
+        ::anno::ui_order(17)
+    ]])
+[[
+	::anno::display_name("Steel Painted - Yellow New"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive", "multimaterial", "interior", "exterior", "new", "yellow", "saturated", "warm"))
+]]
+ = 
+    let {
+        bool tmp0 = false;
+        material_surface tmp1(::df::weighted_layer(dirt_weight * float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x, ::df::diffuse_reflection_bsdf(color(0.174647003f, 0.146449998f, 0.0981639996f), 1.f), ::df::weighted_layer(enable_rust_damage ? histogram_scan_big(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x, 0.0500000007f, 0.0700000003f) : 0.f, ::df::directional_factor((enable_rust_damage ? nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(paint_color, color(0.f, 0.f, 0.f), ::base::color_layer_blend, wash_weight * ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), true).tint, color(0.0843759999f, 0.0367299989f, 0.00778200012f), ::base::color_layer_blend, (1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x) * ::math::pow(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).y, 0.729999959f) * 1.13f, true).tint, ::math::pow(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_bare_metal_albedo.jpg", ::tex::gamma_srgb), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint, bare_metal_darkness), ::base::color_layer_blend, histogram_scan_big(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x, 0.0500000007f, 0.0700000003f), true).tint, color(0.f, 0.f, 0.f), ::base::color_layer_multiply, ::math::pow(1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).z, 1.f), true) : nvidia::core_definitions::blend_colors(paint_color, color(0.f, 0.f, 0.f), ::base::color_layer_blend, wash_weight * ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), true)).tint, color(1.f, 1.f, 1.f), 3.f, ::df::microfacet_ggx_smith_bsdf((enable_rust_damage ? ::math::lerp(screen(histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x, paint_roughness_variation * 0.699999988f, ::math::clamp(paint_roughness * 0.75f + 0.0500000007f + paint_roughness_variation * 0.25f, 0.f, 0.899999976f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), wash_weight) + float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x * dirt_weight, ::math::lerp(0.25f, histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).y, 1.f, 0.579999983f), ::math::pow(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).z, 1.13f)), histogram_scan_big(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x, 0.0500000007f, 0.0700000003f)) : screen(histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x, paint_roughness_variation * 0.699999988f, ::math::clamp(paint_roughness * 0.75f + 0.0500000007f + paint_roughness_variation * 0.25f, 0.f, 0.899999976f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), wash_weight) + float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x * dirt_weight) * (enable_rust_damage ? ::math::lerp(screen(histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x, paint_roughness_variation * 0.699999988f, ::math::clamp(paint_roughness * 0.75f + 0.0500000007f + paint_roughness_variation * 0.25f, 0.f, 0.899999976f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), wash_weight) + float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x * dirt_weight, ::math::lerp(0.25f, histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).y, 1.f, 0.579999983f), ::math::pow(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).z, 1.13f)), histogram_scan_big(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x, 0.0500000007f, 0.0700000003f)) : screen(histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x, paint_roughness_variation * 0.699999988f, ::math::clamp(paint_roughness * 0.75f + 0.0500000007f + paint_roughness_variation * 0.25f, 0.f, 0.899999976f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), wash_weight) + float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x * dirt_weight), (enable_rust_damage ? ::math::lerp(screen(histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x, paint_roughness_variation * 0.699999988f, ::math::clamp(paint_roughness * 0.75f + 0.0500000007f + paint_roughness_variation * 0.25f, 0.f, 0.899999976f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), wash_weight) + float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x * dirt_weight, ::math::lerp(0.25f, histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).y, 1.f, 0.579999983f), ::math::pow(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).z, 1.13f)), histogram_scan_big(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x, 0.0500000007f, 0.0700000003f)) : screen(histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x, paint_roughness_variation * 0.699999988f, ::math::clamp(paint_roughness * 0.75f + 0.0500000007f + paint_roughness_variation * 0.25f, 0.f, 0.899999976f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), wash_weight) + float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x * dirt_weight) * (enable_rust_damage ? ::math::lerp(screen(histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x, paint_roughness_variation * 0.699999988f, ::math::clamp(paint_roughness * 0.75f + 0.0500000007f + paint_roughness_variation * 0.25f, 0.f, 0.899999976f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), wash_weight) + float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x * dirt_weight, ::math::lerp(0.25f, histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).y, 1.f, 0.579999983f), ::math::pow(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).z, 1.13f)), histogram_scan_big(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x, 0.0500000007f, 0.0700000003f)) : screen(histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x, paint_roughness_variation * 0.699999988f, ::math::clamp(paint_roughness * 0.75f + 0.0500000007f + paint_roughness_variation * 0.25f, 0.f, 0.899999976f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), wash_weight) + float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x * dirt_weight), color(1.f, 1.f, 1.f), color(0.f, 0.f, 0.f), ::state::texture_tangent_u(0), ::df::scatter_reflect)), ::df::custom_curve_layer(0.0399999991f, 1.f, 5.f, 1.f, ::df::microfacet_ggx_smith_bsdf((enable_rust_damage ? ::math::lerp(screen(histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x, paint_roughness_variation * 0.699999988f, ::math::clamp(paint_roughness * 0.75f + 0.0500000007f + paint_roughness_variation * 0.25f, 0.f, 0.899999976f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), wash_weight) + float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x * dirt_weight, ::math::lerp(0.25f, histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).y, 1.f, 0.579999983f), ::math::pow(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).z, 1.13f)), histogram_scan_big(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x, 0.0500000007f, 0.0700000003f)) : screen(histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x, paint_roughness_variation * 0.699999988f, ::math::clamp(paint_roughness * 0.75f + 0.0500000007f + paint_roughness_variation * 0.25f, 0.f, 0.899999976f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), wash_weight) + float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x * dirt_weight) * (enable_rust_damage ? ::math::lerp(screen(histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x, paint_roughness_variation * 0.699999988f, ::math::clamp(paint_roughness * 0.75f + 0.0500000007f + paint_roughness_variation * 0.25f, 0.f, 0.899999976f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), wash_weight) + float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x * dirt_weight, ::math::lerp(0.25f, histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).y, 1.f, 0.579999983f), ::math::pow(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).z, 1.13f)), histogram_scan_big(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x, 0.0500000007f, 0.0700000003f)) : screen(histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x, paint_roughness_variation * 0.699999988f, ::math::clamp(paint_roughness * 0.75f + 0.0500000007f + paint_roughness_variation * 0.25f, 0.f, 0.899999976f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), wash_weight) + float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x * dirt_weight), (enable_rust_damage ? ::math::lerp(screen(histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x, paint_roughness_variation * 0.699999988f, ::math::clamp(paint_roughness * 0.75f + 0.0500000007f + paint_roughness_variation * 0.25f, 0.f, 0.899999976f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), wash_weight) + float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x * dirt_weight, ::math::lerp(0.25f, histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).y, 1.f, 0.579999983f), ::math::pow(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).z, 1.13f)), histogram_scan_big(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x, 0.0500000007f, 0.0700000003f)) : screen(histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x, paint_roughness_variation * 0.699999988f, ::math::clamp(paint_roughness * 0.75f + 0.0500000007f + paint_roughness_variation * 0.25f, 0.f, 0.899999976f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), wash_weight) + float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x * dirt_weight) * (enable_rust_damage ? ::math::lerp(screen(histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x, paint_roughness_variation * 0.699999988f, ::math::clamp(paint_roughness * 0.75f + 0.0500000007f + paint_roughness_variation * 0.25f, 0.f, 0.899999976f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), wash_weight) + float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x * dirt_weight, ::math::lerp(0.25f, histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).y, 1.f, 0.579999983f), ::math::pow(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).z, 1.13f)), histogram_scan_big(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x, 0.0500000007f, 0.0700000003f)) : screen(histogram_range(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x, paint_roughness_variation * 0.699999988f, ::math::clamp(paint_roughness * 0.75f + 0.0500000007f + paint_roughness_variation * 0.25f, 0.f, 0.899999976f)), ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), wash_weight) + float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).x * dirt_weight), color(1.f, 1.f, 1.f), color(0.f, 0.f, 0.f), ::state::texture_tangent_u(0), ::df::scatter_reflect), ::df::weighted_layer(1.f, ::df::diffuse_reflection_bsdf((enable_rust_damage ? nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(paint_color, color(0.f, 0.f, 0.f), ::base::color_layer_blend, wash_weight * ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), true).tint, color(0.0843759999f, 0.0367299989f, 0.00778200012f), ::base::color_layer_blend, (1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x) * ::math::pow(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).y, 0.729999959f) * 1.13f, true).tint, ::math::pow(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_bare_metal_albedo.jpg", ::tex::gamma_srgb), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint, bare_metal_darkness), ::base::color_layer_blend, histogram_scan_big(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x, 0.0500000007f, 0.0700000003f), true).tint, color(0.f, 0.f, 0.f), ::base::color_layer_multiply, ::math::pow(1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).z, 1.f), true) : nvidia::core_definitions::blend_colors(paint_color, color(0.f, 0.f, 0.f), ::base::color_layer_blend, wash_weight * ::math::pow(float3(infinite_tiling ? color(vm_tex_infinite(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.151999995f, 0.635999978f, 0.0820000023f), 0.100000001f, false, 2.20000005f)) : vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_dirt_G_nrm_B_wash.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), mono_a, float4(1.f)).tint).z, 0.439999998f), true)).tint, 0.f), bsdf(), enable_rust_damage ? add_detail_normal(vm_tex_normal_lookup(texture_2d("./textures/cracked_paint_surface_bare_norm.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), 1.f), ::math::lerp(infinite_tiling ? add_detail_normal(vm_tex_infinite_normal(texture_2d("./textures/cracked_paint_surface_paint_bg_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.5f), 0.100000001f, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * uneven_normal_strength), vm_tex_infinite_normal(texture_2d("./textures/cracked_paint_surface_chaotic_paint_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.5f), 0.100000001f, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * paint_stroke_normal_strength)) : vm_tex_normal_lookup_2x(texture_2d("./textures/cracked_paint_surface_paint_bg_norm.jpg", ::tex::gamma_linear), texture_2d("./textures/cracked_paint_surface_chaotic_paint_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), vm_coord(float2(0.f), 0.f, float2(1.f), 0), (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * uneven_normal_strength, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * paint_stroke_normal_strength, false), vm_tex_normal_lookup(texture_2d("./textures/cracked_paint_surface_met_norm.jpg", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f) * 0.5f)), 0.870000005f), histogram_scan_big(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x, 0.0500000007f, 0.0700000003f))) : infinite_tiling ? add_detail_normal(vm_tex_infinite_normal(texture_2d("./textures/cracked_paint_surface_paint_bg_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.5f), 0.100000001f, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * uneven_normal_strength), vm_tex_infinite_normal(texture_2d("./textures/cracked_paint_surface_chaotic_paint_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.5f), 0.100000001f, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * paint_stroke_normal_strength)) : vm_tex_normal_lookup_2x(texture_2d("./textures/cracked_paint_surface_paint_bg_norm.jpg", ::tex::gamma_linear), texture_2d("./textures/cracked_paint_surface_chaotic_paint_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), vm_coord(float2(0.f), 0.f, float2(1.f), 0), (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * uneven_normal_strength, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * paint_stroke_normal_strength, false)), enable_rust_damage ? add_detail_normal(vm_tex_normal_lookup(texture_2d("./textures/cracked_paint_surface_bare_norm.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), 1.f), ::math::lerp(infinite_tiling ? add_detail_normal(vm_tex_infinite_normal(texture_2d("./textures/cracked_paint_surface_paint_bg_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.5f), 0.100000001f, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * uneven_normal_strength), vm_tex_infinite_normal(texture_2d("./textures/cracked_paint_surface_chaotic_paint_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.5f), 0.100000001f, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * paint_stroke_normal_strength)) : vm_tex_normal_lookup_2x(texture_2d("./textures/cracked_paint_surface_paint_bg_norm.jpg", ::tex::gamma_linear), texture_2d("./textures/cracked_paint_surface_chaotic_paint_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), vm_coord(float2(0.f), 0.f, float2(1.f), 0), (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * uneven_normal_strength, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * paint_stroke_normal_strength, false), vm_tex_normal_lookup(texture_2d("./textures/cracked_paint_surface_met_norm.jpg", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f) * 0.5f)), 0.870000005f), histogram_scan_big(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x, 0.0500000007f, 0.0700000003f))) : infinite_tiling ? add_detail_normal(vm_tex_infinite_normal(texture_2d("./textures/cracked_paint_surface_paint_bg_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.5f), 0.100000001f, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * uneven_normal_strength), vm_tex_infinite_normal(texture_2d("./textures/cracked_paint_surface_chaotic_paint_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.5f), 0.100000001f, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * paint_stroke_normal_strength)) : vm_tex_normal_lookup_2x(texture_2d("./textures/cracked_paint_surface_paint_bg_norm.jpg", ::tex::gamma_linear), texture_2d("./textures/cracked_paint_surface_chaotic_paint_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), vm_coord(float2(0.f), 0.f, float2(1.f), 0), (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * uneven_normal_strength, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * paint_stroke_normal_strength, false)), enable_rust_damage ? add_detail_normal(vm_tex_normal_lookup(texture_2d("./textures/cracked_paint_surface_bare_norm.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), 1.f), ::math::lerp(infinite_tiling ? add_detail_normal(vm_tex_infinite_normal(texture_2d("./textures/cracked_paint_surface_paint_bg_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.5f), 0.100000001f, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * uneven_normal_strength), vm_tex_infinite_normal(texture_2d("./textures/cracked_paint_surface_chaotic_paint_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.5f), 0.100000001f, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * paint_stroke_normal_strength)) : vm_tex_normal_lookup_2x(texture_2d("./textures/cracked_paint_surface_paint_bg_norm.jpg", ::tex::gamma_linear), texture_2d("./textures/cracked_paint_surface_chaotic_paint_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), vm_coord(float2(0.f), 0.f, float2(1.f), 0), (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * uneven_normal_strength, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * paint_stroke_normal_strength, false), vm_tex_normal_lookup(texture_2d("./textures/cracked_paint_surface_met_norm.jpg", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f) * 0.5f)), 0.870000005f), histogram_scan_big(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x, 0.0500000007f, 0.0700000003f))) : infinite_tiling ? add_detail_normal(vm_tex_infinite_normal(texture_2d("./textures/cracked_paint_surface_paint_bg_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.5f), 0.100000001f, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * uneven_normal_strength), vm_tex_infinite_normal(texture_2d("./textures/cracked_paint_surface_chaotic_paint_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.5f), 0.100000001f, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * paint_stroke_normal_strength)) : vm_tex_normal_lookup_2x(texture_2d("./textures/cracked_paint_surface_paint_bg_norm.jpg", ::tex::gamma_linear), texture_2d("./textures/cracked_paint_surface_chaotic_paint_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), vm_coord(float2(0.f), 0.f, float2(1.f), 0), (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * uneven_normal_strength, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * paint_stroke_normal_strength, false)), enable_rust_damage ? add_detail_normal(vm_tex_normal_lookup(texture_2d("./textures/cracked_paint_surface_bare_norm.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), 1.f), ::math::lerp(infinite_tiling ? add_detail_normal(vm_tex_infinite_normal(texture_2d("./textures/cracked_paint_surface_paint_bg_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.5f), 0.100000001f, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * uneven_normal_strength), vm_tex_infinite_normal(texture_2d("./textures/cracked_paint_surface_chaotic_paint_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.5f), 0.100000001f, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * paint_stroke_normal_strength)) : vm_tex_normal_lookup_2x(texture_2d("./textures/cracked_paint_surface_paint_bg_norm.jpg", ::tex::gamma_linear), texture_2d("./textures/cracked_paint_surface_chaotic_paint_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), vm_coord(float2(0.f), 0.f, float2(1.f), 0), (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * uneven_normal_strength, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * paint_stroke_normal_strength, false), vm_tex_normal_lookup(texture_2d("./textures/cracked_paint_surface_met_norm.jpg", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f) * 0.5f)), 0.870000005f), histogram_scan_big(float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x, 0.0500000007f, 0.0700000003f))) : infinite_tiling ? add_detail_normal(vm_tex_infinite_normal(texture_2d("./textures/cracked_paint_surface_paint_bg_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.5f), 0.100000001f, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * uneven_normal_strength), vm_tex_infinite_normal(texture_2d("./textures/cracked_paint_surface_chaotic_paint_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float3(0.5f), 0.100000001f, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * paint_stroke_normal_strength)) : vm_tex_normal_lookup_2x(texture_2d("./textures/cracked_paint_surface_paint_bg_norm.jpg", ::tex::gamma_linear), texture_2d("./textures/cracked_paint_surface_chaotic_paint_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), vm_coord(float2(0.f), 0.f, float2(1.f), 0), (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * uneven_normal_strength, (enable_rust_damage ? 1.f - float3(vm_tex_lookup(texture_2d("./textures/cracked_paint_surface_met_damage_multi_R_mask_G_trans1_B_trans2.png", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_scale, uv_space_index), float2(::math::clamp(damages_scale, 9.99999975e-05f, 1.f))), mono_a, float4(1.f)).tint).x : 1.f) * paint_stroke_normal_strength, false)), material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+        material_surface tmp2 = material_surface(scattering: bsdf(), emission: material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+        color tmp3 = color(1.f, 1.f, 1.f);
+        material_volume tmp4 = material_volume(scattering: vdf(), absorption_coefficient: color(0.f, 0.f, 0.f), scattering_coefficient: color(0.f, 0.f, 0.f), emission_intensity: color(0.f, 0.f, 0.f));
+        material_geometry tmp5(float3(0.f), 1.f, roundcorners_enable ? ::state::rounded_corner_normal(roundcorners_radius_mm * 0.00100000005f, roundcorners_across_materials, 1.f) : ::state::normal());
+        hair_bsdf tmp6 = hair_bsdf();
+    } in
+        material(
+            thin_walled: tmp0,
+            surface: tmp1,
+            backface: tmp2,
+            ior: tmp3,
+            volume: tmp4,
+            geometry: tmp5,
+            hair: tmp6);
+
+
+export material Steel_Painted_Yellow_Paint_Strokes(*)
+[[
+	::anno::display_name("Steel Painted - Yellow Paint Strokes"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted_Yellow_Paint_Strokes.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive", "multimaterial", "interior", "exterior", "new", "bumped" "yellow", "saturated", "warm"))
+]] = Steel_Painted(
+	infinite_tiling:               false,
+	paint_color:                   color(0.491021f, 0.318547f, 0.024158f),
+	paint_roughness:               0.3f,
+	paint_roughness_variation:     0.0f,
+	dirt_weight:                   0.05f,
+	wash_weight:                   0.0f,
+	paint_stroke_normal_strength:  0.95f,
+	uneven_normal_strength:        0.0f,
+	enable_rust_damage:            false,
+	bare_metal_darkness:           0.65f,
+	damages_scale:                 1.0f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        0.5f,
+	roundcorners_across_materials: false
+);
+
+
+export material Steel_Painted_Yellow_Damaged(*)
+[[
+	::anno::display_name("Steel Painted - Yellow Damaged"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted_Yellow_Damaged.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive", "multimaterial", "interior", "exterior", "damaged", "worn", "rust", "yellow", "saturated", "warm"))
+]] = Steel_Painted(
+	infinite_tiling:               false,
+	paint_color:                   color(0.491021f, 0.318547f, 0.024158f),
+	paint_roughness:               0.42f,
+	paint_roughness_variation:     0.5f,
+	dirt_weight:                   0.18f,
+	wash_weight:                   0.0f,
+	paint_stroke_normal_strength:  0.43f,
+	uneven_normal_strength:        1.0f,
+	enable_rust_damage:            true,
+	bare_metal_darkness:           0.65f,
+	damages_scale:                 1.0f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        0.5f,
+	roundcorners_across_materials: false
+);
+
+
+export material Steel_Painted_Yellow_Overpainted(*)
+[[
+	::anno::display_name("Steel Painted - Yellow Overpainted"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted_Yellow_Overpainted.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive", "multimaterial", "interior", "exterior", "new", "bumped", "yellow", "saturated", "warm"))
+]] = Steel_Painted(
+	infinite_tiling:               false,
+	paint_color:                   color(0.491021f, 0.318547f, 0.024158f),
+	paint_roughness:               0.3f,
+	paint_roughness_variation:     0.5f,
+	dirt_weight:                   0.04f,
+	wash_weight:                   0.0f,
+	paint_stroke_normal_strength:  0.43f,
+	uneven_normal_strength:        1.0f,
+	enable_rust_damage:            false,
+	bare_metal_darkness:           0.65f,
+	damages_scale:                 1.0f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        0.5f,
+	roundcorners_across_materials: false
+);
+
+
+export material Steel_Painted_Yellow_Slightly_Weathered(*)
+[[
+	::anno::display_name("Steel Painted - Yellow Slightly Weathered"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted_Yellow_Slightly_Weathered.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive", "multimaterial", "interior", "exterior", "weathered", "old", "bumped", "yellow", "saturated", "warm"))
+]] = Steel_Painted(
+	infinite_tiling:               false,
+	paint_color:                   color(0.491021f, 0.318547f, 0.024158f),
+	paint_roughness:               0.31f,
+	paint_roughness_variation:     0.46f,
+	dirt_weight:                   0.24f,
+	wash_weight:                   0.54f,
+	paint_stroke_normal_strength:  0.46f,
+	uneven_normal_strength:        0.39f,
+	enable_rust_damage:            false,
+	bare_metal_darkness:           0.65f,
+	damages_scale:                 1.0f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        0.5f,
+	roundcorners_across_materials: false
+);
+
+
+export material Steel_Painted_Yellow_Dirty(*)
+[[
+	::anno::display_name("Steel Painted - Dirty"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted_Yellow_Dirty.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive", "multimaterial", "interior", "exterior", "dirty", "old", "bumped", "yellow", "saturated", "warm"))
+]] = Steel_Painted(
+	infinite_tiling:               false,
+	paint_color:                   color(0.491021f, 0.318547f, 0.024158f),
+	paint_roughness:               0.3f,
+	paint_roughness_variation:     0.5f,
+	dirt_weight:                   0.86f,
+	wash_weight:                   0.0f,
+	paint_stroke_normal_strength:  0.43f,
+	uneven_normal_strength:        0.88f,
+	enable_rust_damage:            false,
+	bare_metal_darkness:           0.65f,
+	damages_scale:                 1.0f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        0.5f,
+	roundcorners_across_materials: false
+);
+
+
+export material Steel_Painted_Heavy_Dirt(*)
+[[
+	::anno::display_name("Steel Painted - Yellow Heavy Dirt"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted_Heavy_Dirt.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive", "multimaterial",  "exterior", "dirty", "old", "weathered", "matte", "yellow", "saturated", "warm"))
+]] = Steel_Painted(
+	infinite_tiling:               false,
+	paint_color:                   color(0.491021f, 0.318547f, 0.024158f),
+	paint_roughness:               0.58f,
+	paint_roughness_variation:     0.5f,
+	dirt_weight:                   0.86f,
+	wash_weight:                   1.0f,
+	paint_stroke_normal_strength:  0.43f,
+	uneven_normal_strength:        1.0f,
+	enable_rust_damage:            false,
+	bare_metal_darkness:           0.65f,
+	damages_scale:                 1.0f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        0.5f,
+	roundcorners_across_materials: false
+);
+
+// What other colors should we still provide along with the catalog?
+export material Steel_Painted_White(*)
+[[
+	::anno::display_name("Steel Painted - White"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted_White.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive",  "interior", "exterior", "new", "white", "bright", "neutral"))
+]] = Steel_Painted(
+	infinite_tiling:               false,
+	paint_color:                   color(0.603827f, 0.603827f, 0.603827f),
+	paint_roughness:               0.12f,
+	paint_roughness_variation:     0.23f,
+	dirt_weight:                   0.04f,
+	wash_weight:                   0.0f,
+	paint_stroke_normal_strength:  0.27f,
+	uneven_normal_strength:        0.0f,
+	enable_rust_damage:            false,
+	bare_metal_darkness:           0.65f,
+	damages_scale:                 1.0f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        0.5f,
+	roundcorners_across_materials: false
+);
+
+
+export material Steel_Painted_Gray(*)
+[[
+	::anno::display_name("Steel Painted - Gray"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted_Gray.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive",  "interior", "exterior", "new", "gray", "neutral"))
+]] = Steel_Painted(
+	infinite_tiling:               false,
+	paint_color:                   color(0.187821f, 0.187821f, 0.187821f),
+	paint_roughness:               0.16f,
+	paint_roughness_variation:     0.23f,
+	dirt_weight:                   0.04f,
+	wash_weight:                   0.0f,
+	paint_stroke_normal_strength:  0.27f,
+	uneven_normal_strength:        0.16f,
+	enable_rust_damage:            false,
+	bare_metal_darkness:           0.65f,
+	damages_scale:                 1.0f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        0.5f,
+	roundcorners_across_materials: false
+);
+
+
+export material Steel_Painted_Dark_Gray(*)
+[[
+	::anno::display_name("Steel Painted - Dark Gray"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted_Dark_Gray.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive","interior", "exterior", "new", "gray", "dark", "neutral"))
+]] = Steel_Painted(
+	infinite_tiling:               false,
+	paint_color:                   color(0.076185f, 0.076185f, 0.076185),
+	paint_roughness:               0.16f,
+	paint_roughness_variation:     0.12f,
+	dirt_weight:                   0.04f,
+	wash_weight:                   0.0f,
+	paint_stroke_normal_strength:  0.27f,
+	uneven_normal_strength:        0.0f,
+	enable_rust_damage:            false,
+	bare_metal_darkness:           0.65f,
+	damages_scale:                 1.0f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        0.5f,
+	roundcorners_across_materials: false
+);
+
+
+export material Steel_Painted_Black(*)
+[[
+	::anno::display_name("Steel Painted - Black"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted_Black.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive","interior", "exterior", "new", "black", "dark", "neutral"))
+]] = Steel_Painted(
+	infinite_tiling:               false,
+	paint_color:                   color(0.026241f),
+	paint_roughness:               0.11f,
+	paint_roughness_variation:     0.12f,
+	dirt_weight:                   0.04f,
+	wash_weight:                   0.0f,
+	paint_stroke_normal_strength:  0.08f,
+	uneven_normal_strength:        0.015f,
+	enable_rust_damage:            false,
+	bare_metal_darkness:           0.65f,
+	damages_scale:                 1.0f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        0.5f,
+	roundcorners_across_materials: false
+);
+
+
+export material Steel_Painted_Russet_Matte(*)
+[[
+	::anno::display_name("Steel Painted - Russet Matte"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted_Russet_Matte.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive","interior", "exterior", "new", "russet", "warm", "red", "brown"))
+]] = Steel_Painted(
+	infinite_tiling:               false,
+	paint_color:                   color(0.283149f, 0.066626f, 0.061246f),
+	paint_roughness:               0.32f,
+	paint_roughness_variation:     0.2f,
+	dirt_weight:                   0.2f,
+	wash_weight:                   0.1f,
+	paint_stroke_normal_strength:  0.18f,
+	uneven_normal_strength:        0.0f,
+	enable_rust_damage:            false,
+	bare_metal_darkness:           0.65f,
+	damages_scale:                 1.0f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        0.5f,
+	roundcorners_across_materials: false
+);
+
+
+
+export material Steel_Painted_Dark_Blue(*)
+[[
+	::anno::display_name("Steel Painted - Dark Blue"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted_Dark_Blue.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive","interior", "exterior", "new", "blue", "dark", "cool", "saturated"))
+]] = Steel_Painted(
+	infinite_tiling:               false,
+	paint_color:                   color(0.021219f, 0.063010f, 0.208637f),
+	paint_roughness:               0.12f,
+	paint_roughness_variation:     0.1f,
+	dirt_weight:                   0.04f,
+	wash_weight:                   0.0f,
+	paint_stroke_normal_strength:  0.18f,
+	uneven_normal_strength:        0.0f,
+	enable_rust_damage:            false,
+	bare_metal_darkness:           0.65f,
+	damages_scale:                 1.0f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        0.5f,
+	roundcorners_across_materials: false
+);
+
+
+export material Steel_Painted_Light_Blue_Weathered(*)
+[[
+	::anno::display_name("Steel Painted - Light Blue Weathered"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted_Light_Blue_Weathered.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive","interior", "exterior", "old", "aged", "bleached", "weathered", "blue", "light", "pastel", "cool"))
+]] = Steel_Painted(
+	infinite_tiling:               false,
+	paint_color:                   color(0.174647f, 0.391572f, 0.467784f),
+	paint_roughness:               0.45f,
+	paint_roughness_variation:     1.0f,
+	dirt_weight:                   0.1f,
+	wash_weight:                   0.72f,
+	paint_stroke_normal_strength:  0.36f,
+	uneven_normal_strength:        0.91f,
+	enable_rust_damage:            false,
+	bare_metal_darkness:           0.65f,
+	damages_scale:                 1.0f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        0.5f,
+	roundcorners_across_materials: false
+);
+
+
+export material Steel_Painted_Orange(*)
+[[
+	::anno::display_name("Steel Painted - Orange"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted_Orange.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive","interior", "exterior", "new", "orange", "warm", "saturated"))
+]] = Steel_Painted(
+	infinite_tiling:               false,
+	paint_color:                   color(0.467784f, 0.107023f, 0.019382f),
+	paint_roughness:               0.16f,
+	paint_roughness_variation:     0.23f,
+	dirt_weight:                   0.04f,
+	wash_weight:                   0.0f,
+	paint_stroke_normal_strength:  0.18f,
+	uneven_normal_strength:        0.0f,
+	enable_rust_damage:            false,
+	bare_metal_darkness:           0.65f,
+	damages_scale:                 1.0f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        0.5f,
+	roundcorners_across_materials: false
+);
+
+
+export material Steel_Painted_Arcadia_Green(*)
+[[
+	::anno::display_name("Steel Painted - Arcadia Green"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted_Arcadia_Green.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive","interior", "exterior", "new", "arcadia green", "green", "cool"))
+]] = Steel_Painted(
+	infinite_tiling:               false,
+	paint_color:                   color(0.119538f, 0.262251f, 0.223228f),
+	paint_roughness:               0.16f,
+	paint_roughness_variation:     0.23f,
+	dirt_weight:                   0.04f,
+	wash_weight:                   0.0f,
+	paint_stroke_normal_strength:  0.18f,
+	uneven_normal_strength:        0.0f,
+	enable_rust_damage:            false,
+	bare_metal_darkness:           0.65f,
+	damages_scale:                 1.0f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        0.5f,
+	roundcorners_across_materials: false
+);
+
+
+export material Steel_Painted_Dark_Brown(*)
+[[
+	::anno::display_name("Steel Painted - Dark Brown"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted_Dark_Brown.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive","interior", "exterior", "new", "brown", "warm", "saturated", "dark"))
+]] = Steel_Painted(
+	infinite_tiling:               false,
+	paint_color:                   color(0.109462f, 0.045186f, 0.024158f),
+	paint_roughness:               0.16f,
+	paint_roughness_variation:     0.0f,
+	dirt_weight:                   0.04f,
+	wash_weight:                   0.0f,
+	paint_stroke_normal_strength:  0.18f,
+	uneven_normal_strength:        0.0f,
+	enable_rust_damage:            false,
+	bare_metal_darkness:           0.65f,
+	damages_scale:                 1.0f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        0.5f,
+	roundcorners_across_materials: false
+);
+
+
+export material Steel_Painted_Khaki(*)
+[[
+	::anno::display_name("Steel Painted - Khaki"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted_Khaki.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive","interior", "exterior", "new", "khaki", "brown", "light", "warm", "pastel"))
+]] = Steel_Painted(
+	infinite_tiling:               false,
+	paint_color:                   color(0.396755f, 0.346704f, 0.165132f),
+	paint_roughness:               0.16f,
+	paint_roughness_variation:     0.12f,
+	dirt_weight:                   0.04f,
+	wash_weight:                   0.0f,
+	paint_stroke_normal_strength:  0.18f,
+	uneven_normal_strength:        0.0f,
+	enable_rust_damage:            false,
+	bare_metal_darkness:           0.65f,
+	damages_scale:                 1.0f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        0.5f,
+	roundcorners_across_materials: false
+);
+
+
+export material Steel_Painted_Army_Green(*)
+[[
+	::anno::display_name("Steel Painted - Army Green"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::description(DESCRIPTION),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted_Army_Green.png"),
+	::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive","interior", "exterior", "new", "army", "green", "dark", "cool"))
+]] = Steel_Painted(
+	infinite_tiling:               false,
+	paint_color:                   color(0.066626f, 0.080220f, 0.012983f),
+	paint_roughness:               0.32f,
+	paint_roughness_variation:     0.07f,
+	dirt_weight:                   0.11f,
+	wash_weight:                   0.05f,
+	paint_stroke_normal_strength:  0.18f,
+	uneven_normal_strength:        0.0f,
+	enable_rust_damage:            false,
+	bare_metal_darkness:           0.65f,
+	damages_scale:                 1.0f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        0.5f,
+	roundcorners_across_materials: false
+);
+
+
+// export material Steel_Painted_(*)
+// [[
+	// ::anno::display_name("Steel Painted - "),
+	// ::anno::author("Nvidia vMaterials"),
+	// ::anno::description(DESCRIPTION),
+	// ::anno::contributor("Maik Rohland"),
+	// ::anno::contributor("Ruediger Raab"),
+	// ::anno::copyright_notice(COPYRIGHT),
+	// ::anno::thumbnail("./.thumbs/Steel_Painted.Steel_Painted.png"),
+	// ::anno::key_words(string[]("steel", "metal", "paint", "coated", "construction", "urban", "architecture", "naval", "automotive","interior", "exterior", "new"))
+// ]] = Steel_Painted(
+	// infinite_tiling:               false,
+	// paint_color:                   color(),
+	// paint_roughness:               0.12f,
+	// paint_roughness_variation:     0.0f,
+	// dirt_weight:                   0.04f,
+	// wash_weight:                   0.0f,
+	// paint_stroke_normal_strength:  0.2f,
+	// uneven_normal_strength:        0.0f,
+	// enable_rust_damage:            false,
+	// bare_metal_darkness:           0.65f,
+	// damages_scale:                 1.0f,
+	// texture_translate:             float2(0.0f),
+	// texture_rotate:                0.0f,
+	// texture_scale:                 float2(1.0f),
+	// uv_space_index:                0,
+	// roundcorners_enable:           false,
+	// roundcorners_radius_mm:        0.5f,
+	// roundcorners_across_materials: false
+// );
+

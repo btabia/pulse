@@ -1,0 +1,205 @@
+---
+
+task: 
+  name: baseline_dengler
+  target_prim_path: "/World/Target"
+  play: False
+  perf_log_path: "./performance_data/"
+  device: "cuda:${oc.decode:${oc.env:CUDA_DEVICE}}"
+  device_n: "${oc.decode:${oc.env:CUDA_DEVICE}}"
+  freq: 90
+  num_envs: 1
+  controller_type: "task_space"
+
+  # max scale : 0.035 / min scale : 0.001
+  particles: 
+    precontact_distance: 2.5
+    prim_path: "/World/ParticleSet"
+    name: "Debris"
+    position: [0.0, 0.00, 0.0] 
+    scale: [0.035, 0.035, 0.035] 
+    size_scale: [1.8, 4]
+    color: [1, 1, 0]
+    mass: 0.1 # 10 Kgrams
+    #density: 2.4 # concrete density
+
+
+  tool:
+    prim_path_bristles: "/World/kinova_7dof_brush/kinova_7dof_brush/robot/bristles"
+    prim_path_base: "/World/kinova_7dof_brush/kinova_7dof_brush/robot/base"
+
+  kinematics: 
+    robot_description_path: /home/btabia/git/new/Malleabot/assets/robot/lula_description.yaml
+    urdf_path: /home/btabia/git/new/Malleabot/assets/robot/GEN3-7DOF-VISION_ARM_URDF_V12.urdf
+    ee_link: "end_effector_link"
+
+
+  target:
+    prim_path: "/World/Target"
+    name: "target"
+    position: [0.7, 0, 0]
+    scale: [0.01, 0.01, 0.01]
+    color: [1, 0, 0]
+    radius: 0.05
+    height: 0.001
+    randomize: True
+    first_position: [0.75, 0, 0.0]
+    moving: False
+    velocity: [0.03, 0.03, 0.0] # [0.3, 0.3, 0.0]
+  
+  init: 
+    delay: 30
+    randomize: False
+    robot_dx: 0.10
+    robot_dy: 0.10
+    debris_dx: 0.10
+    debris_dy: 0.10
+    target_dx: 0.10
+    target_dy: 0.10
+    debris_target_min_dist: 0.1
+    brush_orientation: [0,0,0]
+    target: [0.65, -0.1, 0.0] #[0.75, 0, 0.0]
+    medium: [0.65, 0.15, 0.0] #[0.75, 0, 0.0] 
+    robot: [0.65, 0.20, 0.15] #[0.75,0,0.15]
+    centre: [0.8,0]
+    debris_brush_min_dist: 8
+    marker_prim_path: "/World/Visuals/Target"
+    robot_joints: [0,-(np.pi/2),0,(np.pi/2),0,(np.pi/2),0]
+
+
+  rewards: 
+    ka: 1
+    kb: 1
+    reach_target: 50
+    
+    
+  done: 
+    active: True
+    debris_target_mean_dist: 0.05
+    debris_target_max_dist: 0.1
+    ee_out_limit: 0.30 # radius
+
+  reset: 
+    debris_target_dist: 0.02
+    brush_debris_dist: 0.02
+    exclusion_dist: 0.1
+
+  camera:
+    intrinsic_matrix: [[[211.03183, 0, 213],[0, 211.03183, 120],[0, 0, 1]]]
+    img_w: 64
+    img_h: 64
+    padding: 16
+    position: 
+      camera_0: [1,0.5,0.5]
+      camera_1: [0.19999997, 0.5, 0.5]
+      camera_2: [0.19999997, -0.5, 0.5]
+      camera_3: [1,-0.5,0.5]
+    orientation:
+      camera_0: [-0.35355339, -0.35355339, -0.14644663, 0.85355339]
+      camera_1: [0.85355339, 0.14644663, 0.35355339, -0.35355339]
+      camera_2: [0.85355339, -0.14644663, 0.35355339, 0.35355339]
+      camera_3: [0.35355339, -0.35355339, 0.14644663, 0.85355339]
+
+  recording: 
+    enabled: False
+    file_path: "/home/btabia/git/new/Malleabot/img_record/img_record_set_3/"
+
+  vision: 
+    min_x: 0.1
+    min_y: -0.5
+    max_x: 1.1
+    max_y: 0.5
+    size_w: 32
+    size_h: 32
+    VAE: 
+      input_dims: 1
+      latent_dims: 32
+      model_path: "/home/btabia/git/new/Malleabot/utils/vision/models/vae_models/dazzling_vortex_13/model_checkpoint_24.zip"
+
+  action:
+    xmin_limit: 0.3
+    xmax_limit: 0.9
+    ymin_limit: -0.35
+    ymax_limit: 0.35
+    z_command: 0.14
+  
+  objects: 
+    type: "training"
+    range_idx: [0,2]
+    init_pos: [0.6, 0.0, 0.03]
+    full_set: 
+      init_pos: [
+        [1.6, -1, 0.06997],
+        [1.6, -0.8, 0.02366],
+        [1.6, -0.6, 0.02128],
+        [1.6, -0.4, 0.03601],
+        [1.6, -0.2, 0.02597],
+        [1.6, 0.0, 0.0281],
+        [1.6, 0.2, 0.0184],
+        [1.6, 0.4, 0.03477],
+        [1.6, 0.6, 0.04045],
+        [1.6, 0.8, 0.02724],
+        [1.6, 1, 0.02496],
+      ]
+      prim_path: [
+        "/World/collection/ycb/master_chef_can", 
+        "/World/collection/ycb/tuna_fish_can", 
+        "/World/collection/ycb/sugar_box", 
+        "/World/collection/ycb/rubiks_cube", 
+        "/World/collection/ycb/foam_brick", 
+        "/World/collection/ycb/mustard_bottle", 
+        "/World/collection/ycb/pudding_box", 
+        "/World/collection/ycb/cracker_box", 
+        "/World/collection/ycb/mug", 
+        "/World/collection/ycb/bowl", 
+        "/World/collection/ycb/power_drill", 
+      ]
+    training_set:  
+      init_pos: [
+        #[1.6, -1, 0.06997],
+        #[1.6, -0.8, 0.02366],
+        #[1.6, -0.6, 0.02128],
+        [1.6, -0.4, 0.03601],
+        #[1.6, -0.2, 0.02597],
+        #[1.6, 0.0, 0.0281],
+        #[1.6, 0.2, 0.0184],
+        #[1.6, 0.4, 0.03477],
+        #[1.6, 0.6, 0.04045],
+        #[1.6, 0.8, 0.02724],
+        #[1.6, 1, 0.02496],
+      ]
+      prim_path: [
+        #"/World/collection/ycb/master_chef_can", 
+        #"/World/collection/ycb/tuna_fish_can", 
+        #"/World/collection/ycb/sugar_box", 
+        "/World/collection/ycb/rubiks_cube", 
+        #"/World/collection/ycb/foam_brick", 
+        #"/World/collection/ycb/mustard_bottle", 
+        #"/World/collection/ycb/pudding_box", 
+        #"/World/collection/ycb/cracker_box", 
+        #"/World/collection/ycb/mug", 
+        #"/World/collection/ycb/bowl", 
+        #"/World/collection/ycb/power_drill", 
+      ]
+    testing_set: 
+      init_pos: [
+        [1.6, -1, 0.06997],
+        [1.6, -0.6, 0.02128],
+        [1.6, -0.2, 0.02597],
+        [1.6, 0.2, 0.0184],
+        [1.6, 0.6, 0.04045],
+      ]
+      init_ori: [
+        [0.070711, 070711, 0, 0],
+        [1,0,0,0],
+        [1,0,0,0],
+        [1,0,0,0],
+        [-0.070711, 070711, 0, 0],
+      ]
+      prim_path: [
+
+      ]
+    surface: 
+      prim_path: "/World/Ground"
+      dynamic_friction: [0, 0.6]
+      static_friction: [0, 0.2]

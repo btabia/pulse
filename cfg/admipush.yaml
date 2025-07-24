@@ -1,0 +1,15 @@
+---
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+    
+defaults:
+    - train: ppo_cnn # default/ppo/tqc/sac
+    - wandb: admipush_ppo
+    - hydra: defaults
+    - app: lab_app
+    - env: admipush_cnn
+    - tasks: admipush_cnn
+    - play: admipush_ppo
+

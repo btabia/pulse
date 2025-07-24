@@ -1,0 +1,512 @@
+/******************************************************************************
+ *	 Copyright 2024 NVIDIA Corporation. All rights reserved.	 *
+ ******************************************************************************
+
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA's Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL,
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+mdl 1.6;
+
+import ::anno::*;
+import ::base::*;
+import ::df::*;
+import ::math::*;
+import ::state::*;
+import ::tex::*;
+import ::nvidia::core_definitions::blend_colors;
+import ::nvidia::core_definitions::dimension;
+
+const string COPYRIGHT =
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n"
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n"
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+const string DESCRIPTION = "A diamont metal plate material. The added texture reduces the risk of slipping, "
+"making diamond plate a solution for stairs, catwalks, walkways, and ramps in industrial settings";
+
+
+int lowbias32(int x)
+{
+    x ^= x >>> 16;
+    x *= 0x7feb352d;
+    x ^= x >>> 15;
+    x *= 0x846ca68b;
+    x ^= x >>> 16;
+    return x;
+}
+
+float uint2float(int x)
+{
+    return float(x & 0x7FFFFFFF) + (x < 0 ? 2147483648.0 : 0.0);
+}
+
+float2x2 invert_2x2(float2x2 M)
+{
+	float det = M[0][0]*M[1][1] - M[0][1]*M[1][0];
+	//https://www.chilimath.com/lessons/advanced-algebra/inverse-of-a-2x2-matrix/
+	return (1.0 / det) * float2x2(M[1][1], -M[0][1], -M[1][0], M[0][0]);
+}
+
+float2 rnd22(int2 p) {
+	float2 ret_val = float2(
+		uint2float(lowbias32(p[0] + lowbias32(p[1]))) / 4294967296.f,
+		uint2float(lowbias32(p[0] + 32000 + lowbias32(p[1]))) / 4294967296.f
+	);
+    return ret_val;
+}    
+
+float contrast_brightness(
+	float input = 0.5f, 
+	float contrast = 0.5f, 
+	float brightness = 0.5f
+)
+{
+	float return_value = contrast > 0.5 ?  
+		float(math::clamp((input - 0.5) * 1/(1.000001 - (contrast - 0.5)*2.0) + 0.5, 0.0, 1.0) + (brightness - 0.5) * 2.0)
+			:
+		float(math::clamp((input - 0.5) * contrast * 2.0 + 0.5 + (brightness - 0.5)*2.0, 0.0, 1.0));
+	
+	return return_value;		
+}
+
+float3 transform_internal_to_tangent(float3 n)
+[[ 
+    anno::hidden() 
+]]
+{
+    return
+        n.x* float3(state::texture_tangent_u(0).x,state::texture_tangent_v(0).x,state::normal().x)+
+        n.y* float3(state::texture_tangent_u(0).y,state::texture_tangent_v(0).y,state::normal().y)+
+        n.z* float3(state::texture_tangent_u(0).z,state::texture_tangent_v(0).z,state::normal().z);
+}
+
+// Returns the normal n in internal space, given n is in tangent space.
+float3 transform_tangent_to_internal(float3 n)
+[[ 
+    anno::hidden() 
+]]
+{
+    return  state::texture_tangent_u(0) * n.x +
+            state::texture_tangent_v(0) * n.y +
+            state::normal() * n.z ;
+}
+
+// Returns a normal by adding a detail normal to a global normal.
+// If detail blending of two normal maps gives visual artifacts, check if texture_2d are loaded
+// correctly with tex::gamma_linear
+float3 add_detail_normal(float3 nd = state::normal(), float3 n = state::normal())
+{
+    // http://blog.selfshadow.com/publications/blending-in-detail/
+    float3 n_t = transform_internal_to_tangent(n);
+    float3 nd_t = transform_internal_to_tangent(nd);
+
+    n_t=n_t + float3(0.,0.,1.);
+    nd_t = nd_t *  float3(-1.,-1.,1.);
+    n = n_t*math::dot(n_t, nd_t)/n_t.z - nd_t;
+    return ::math::normalize(transform_tangent_to_internal(n));
+}
+
+float histogram_range(float input, float range = 1.0f, float position = 0.5f)
+{	
+	float low = ::math::clamp(1.0 - ::math::min(((1.0 - position) + range * 0.5), (1.0 - position) * 2), 0.0, 1.0);
+	float high = ::math::clamp(math::min((position + range * 0.5 ), position * 2.0), 0.0, 1.0);
+	return ::math::lerp(low, high, input);
+}
+
+float remap_xy_to_0_1(float input, float x, float y)
+{
+	return (input - x)/(y - x);
+}
+
+float histogram_scan_big(float input, float width, float position)
+{
+	return ::math::clamp(
+				remap_xy_to_0_1(input,
+					::math::lerp(-width, 1.0, position),
+					::math::lerp(0.0, 1.0 + width, position)),
+				0.0,
+				1.0);
+}
+
+struct vm_coordinates{
+	float2 uv;
+	float rotation;
+	int uv_space_index;
+	float4 carry;
+};
+
+enum vm_mono_select 
+[[
+	::anno::description("Modes for the creation of a gray-scale value from a color."),
+	::anno::hidden()
+]]
+{
+	mono_r = 0,
+	mono_g = 1,
+	mono_b = 2,
+	mono_a = 3,
+	mono_average = 4
+};
+
+vm_coordinates vm_coord
+(
+	float2 translation	= float2(0.0f, 0.0) [[
+		::anno::display_name("Translation"),
+		::anno::description("Translates the coordinates.")
+	]],
+	float rotation 		= 0.0f [[
+		::anno::display_name("Rotation"),
+		::anno::description("Rotates the coordinates in degrees.")
+	]],
+	float2 scaling		= float2(1.0f, 1.0f) [[
+		::anno::display_name("Scaling"),
+		::anno::description("Scales the coordinates.")
+	]],	
+	uniform int uv_space = 0 [[
+		::anno::display_name("UV Space"),
+		::anno::description("Chose the UV space.")
+	]]
+)
+[[
+		::anno::display_name("vm Transform"),
+		::anno::description("Generates coordinates to be used in vm_lookup functions.")
+]]
+{
+	vm_coordinates uv;
+	::base::texture_coordinate_info info = ::base::coordinate_source( ::base::texture_coordinate_uvw, uv_space);
+	uv.rotation = (rotation * 3.1415926535897932384626433832f) / 180.f;
+	uv.uv = float2(info.position.x, info.position.y);
+	float sine   = ::math::sin(uv.rotation);
+	float cosine = ::math::cos(uv.rotation);
+	float2x2 rot = float2x2(cosine, -sine, sine, cosine);
+	uv.uv = rot * uv.uv;
+	uv.uv /= scaling;
+	uv.uv += translation;
+	// Translation before or after rotation?
+	return uv;
+}
+
+vm_coordinates vm_coord_post_scale(
+	vm_coordinates uv = vm_coord(),
+	float2 scale = float2(1.0f)
+)
+{
+	uv.uv /= scale;
+	return uv;
+}
+
+float3 vm_tex_infinite(
+	uniform texture_2d tex = texture_2d(),
+	vm_coordinates uv = vm_coord(),
+	float3 average_color = float3(0.5f, 0.5f, 1.0f),
+	float patch_size = 1.0,
+	bool gamma_correct = true,
+	float gamma = 2.2f
+)
+{
+	float2 uv_in = uv.uv;
+	
+	float3 O = float3(0.f);
+	float2x2 M0 = float2x2(1.f,0.f, 0.5f, ::math::sqrt(3.f)/2.f);
+	float2x2 M = invert_2x2(M0); // transform matrix <-> tilted space
+	
+	float2 U = uv_in;
+	float2 V = M * (uv.uv / patch_size); //pre-tilted hexa coordinates
+	int2 I = int2(::math::floor(V))+int2(800); // hexa-tile id
+	
+	// The mean color needs to be determined in Photoshop then to make the
+	// average color work out, take the float value and calculate the apropriate
+	// mean value as (value^(1/2.2))
+
+	float3 m = average_color;
+	
+	float3 F = float3(::math::frac(V)[0], ::math::frac(V)[1], 0.f), W;
+	F[2] = 1.0 - F[0] - F[1]; // local hexa coordinates
+	
+	if( F[2] > 0.f )
+		O = (W[0] = F[2]) * (( ::tex::lookup_float3(tex, U-rnd22(I))) - m)
+		  + (W[1] = F[1]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(0,1)))) - m)
+		  + (W[2] = F[0]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(1,0)))) - m);
+	else
+		O = (W[0] =      -F[2]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(1))))   - m)
+	      + (W[1] = 1.f - F[1]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(1, 0)))) - m)
+		  + (W[2] = 1.f - F[0]) * (( ::tex::lookup_float3(tex, U-rnd22(I+int2(0, 1)))) - m);
+	O = m + O/::math::length(W);
+	O = ::math::clamp( (O), 0.0f, 1.0f);
+	
+	return gamma_correct? ::math::pow(::math::max(O, float3(0.0f)), gamma) : float3(O);
+}
+
+::base::texture_return vm_tex_lookup(
+	uniform texture_2d tex,
+	vm_coordinates uv = vm_coord(),
+	uniform vm_mono_select mono_source = mono_a,
+	float4 scale = float4(1.0f))
+{
+	float mono;
+	float4 lookup = ::tex::lookup_float4(tex, uv.uv, ::tex::wrap_repeat, ::tex::wrap_repeat) * scale;
+	switch( mono_source ) {
+		case mono_r: mono = lookup.x;
+			break;
+		case mono_g: mono = lookup.y;
+			break;
+		case mono_b: mono = lookup.z;
+			break;
+		case mono_a: mono = lookup.w;
+			break;
+		case mono_average: mono = ::math::average(float3(lookup.x, lookup.y, lookup.z));
+			break;
+	}
+	return ::base::texture_return(color(lookup.x, lookup.y, lookup.z), mono);
+}
+
+float3 vm_tex_normal_lookup(
+	uniform texture_2d tex,
+	vm_coordinates uv = vm_coord(),
+	float strength = 1.0f
+)
+{
+	float rot = uv.rotation;
+	// Lookup and convert normal texture to -1 ... 1 range
+	float3 norm = (::tex::lookup_float3(tex, uv.uv, ::tex::wrap_repeat, ::tex::wrap_repeat) - float3(.5f)) * 2.0f;
+	norm = ::math::normalize(norm * float3(strength, strength, 1.0));
+	// if any rotation happened prior to the lookup, compensate for it
+	norm = float3(::math::cos(rot) * norm.x - ::math::sin(rot) * norm.y,
+					::math::sin(rot) * norm.x + ::math::cos(rot) * norm.y,
+					norm.z);
+	return norm.x * ::state::texture_tangent_u(uv.uv_space_index) +
+			norm.y * ::state::texture_tangent_v(uv.uv_space_index) +
+			norm.z * ::state::normal();
+}
+
+export material Punched_Circular_Plate(
+    float metal_roughness = 0.27f [[
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::display_name("Metal Roughness"),
+        ::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 1.f),
+        ::anno::ui_order(0)
+    ]],
+    float roughness_variation = 0.06f [[
+        ::anno::description("Amount of variation applied to the roughness, higher numbers lead to non-uniform reflections of the material."),
+        ::anno::display_name("Roughness Variation"),
+        ::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 1.f),
+        ::anno::ui_order(1)
+    ]],
+    float dirt_amount = 0.f [[
+        ::anno::description("The amount of dirt applied to the material."),
+        ::anno::display_name("Dirt Amount"),
+        ::anno::in_group("Appearance", "Dirt"),
+        ::anno::hard_range(0.f, 1.f),
+        ::anno::ui_order(3)
+    ]],
+    float dirt_weight = 1.f [[
+        ::anno::description("Makes the dirt transition sharper and more defined."),
+        ::anno::display_name("Dirt Weight"),
+        ::anno::in_group("Appearance", "Dirt"),
+        ::anno::hard_range(0.f, 1.f),
+        ::anno::ui_order(4)
+    ]],
+    float dirt_brightness = 0.38f [[
+        ::anno::description("Amkes the dirt arker or brighter."),
+        ::anno::display_name("Dirt Brightness"),
+        ::anno::in_group("Appearance", "Dirt"),
+        ::anno::hard_range(0.f, 1.f),
+        ::anno::ui_order(5)
+    ]],
+    float2 texture_translate = float2(0.f) [[
+        ::anno::description("Controls the position of the texture."),
+        ::anno::display_name("Texture Translate"),
+        ::anno::in_group("Transform"),
+        ::anno::ui_order(6)
+    ]],
+    float texture_rotate = 0.f [[
+        ::anno::description("Rotates angle of the texture in degrees."),
+        ::anno::display_name("Texture Rotate"),
+        ::anno::in_group("Transform"),
+        ::anno::ui_order(7)
+    ]],
+    float2 texture_scale = float2(1.0f) [[
+        ::anno::description("Larger numbers increase the size."),
+        ::anno::display_name("Texture Scale"),
+        ::anno::in_group("Transform"),
+		::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+        ::anno::ui_order(8)
+    ]],
+    uniform int uv_space_index = 0 [[
+        ::anno::description("Uses selected UV space."),
+        ::anno::display_name("UV Space Index"),
+        ::anno::in_group("Advanced"),
+        ::anno::ui_order(9)
+    ]],
+    uniform bool roundcorners_enable = false [[
+        ::anno::description("Enables the round corner effect. Comes at a slight performance cost as additional raytracing calls are required to evaluate the round corner effect."),
+        ::anno::display_name("Enable Round Corners"),
+        ::anno::in_group("Round Corners"),
+        ::anno::ui_order(10)
+    ]],
+    uniform float roundcorners_radius_mm = 1.f [[
+        ::anno::description("Radius of the rounded corners."),
+        ::anno::display_name("Round Corner Radius"),
+        ::anno::in_group("Round Corners"),
+        ::anno::ui_order(11)
+    ]],
+    uniform bool roundcorners_across_materials = false [[
+        ::anno::description("Applies the round corner effect across different materials when enabled."),
+        ::anno::display_name("Across Materials"),
+        ::anno::in_group("Round Corners"),
+        ::anno::ui_order(12)
+    ]])
+[[
+	::anno::author("NVIDIA vMaterials"),
+    ::anno::display_name("Punched Circular Plate - New Shiny"),
+	::anno::contributor("Rüdiger Raab"),
+    ::anno::description(DESCRIPTION),
+	::anno::key_words(string[]("metal", "plate", "diamond", "reflective", "pattern", "safety", "bumped", "embossed", "infinite tiling", "architecture", "construction", "naval", "exterior", "new", "shiny", "gray")), 
+	::anno::thumbnail("./.thumbs/Punched_Circular_Plate.Punched_Circular_Plate.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]]
+ = 
+    let {
+		
+        bool tmp0 = false;
+		float pattern_shininess = 0.f;
+		float2 texture_rescale = texture_scale * 0.13f;
+		
+		// replace the textures here for different punched cutout shapes
+		texture_2d shape_multi_ao_height = texture_2d("./textures/circle_shape_multi_R_ao_G_height_B_opacity.jpg", ::tex::gamma_linear);
+		texture_2d shape_norm = texture_2d("./textures/circle_shape_norm.jpg", ::tex::gamma_linear);
+		
+        material_surface tmp1(::df::weighted_layer(contrast_brightness(::math::clamp(::math::lerp(1.f, histogram_scan_big(vm_tex_infinite(texture_2d("./textures/transition_noise.jpg", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float2(5.f)), float3(0.50999999f), 1.f, true, 2.20000005f).x, 0.620000005f, dirt_amount) + ::math::max(float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).y, ::math::pow(float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).x, 0.680000007f) * ::math::pow(1.f - vm_tex_infinite(texture_2d("./textures/plate_dirt.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float3(0.647000015f), 1.f, false, 2.20000005f).x, 0.969999969f)), ::math::pow(dirt_weight, 0.280000001f)), 0.f, 1.f), 0.659999967f, 0.5f), ::df::microfacet_ggx_smith_bsdf(::math::lerp(0.639999986f, histogram_range(vm_tex_infinite(texture_2d("./textures/plate_dirt.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float3(0.647000015f), 1.f, false, 2.20000005f).x, roughness_variation * 0.400000006f, metal_roughness * 0.629999995f + 0.0500000007f) + roughness_variation * 0.299999982f * ::math::pow(1.f - float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).x, 1.26999998f), ::math::clamp(::math::lerp(1.f, histogram_scan_big(vm_tex_infinite(texture_2d("./textures/transition_noise.jpg", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float2(5.f)), float3(0.50999999f), 1.f, true, 2.20000005f).x, 0.620000005f, dirt_amount) + ::math::max(float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).y, ::math::pow(float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).x, 0.680000007f) * ::math::pow(1.f - vm_tex_infinite(texture_2d("./textures/plate_dirt.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float3(0.647000015f), 1.f, false, 2.20000005f).x, 0.969999969f)), ::math::pow(dirt_weight, 0.280000001f)), 0.f, 1.f)) * (1.f - pattern_shininess * float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).y) * (::math::lerp(0.639999986f, histogram_range(vm_tex_infinite(texture_2d("./textures/plate_dirt.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float3(0.647000015f), 1.f, false, 2.20000005f).x, roughness_variation * 0.400000006f, metal_roughness * 0.629999995f + 0.0500000007f) + roughness_variation * 0.299999982f * ::math::pow(1.f - float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).x, 1.26999998f), ::math::clamp(::math::lerp(1.f, histogram_scan_big(vm_tex_infinite(texture_2d("./textures/transition_noise.jpg", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float2(5.f)), float3(0.50999999f), 1.f, true, 2.20000005f).x, 0.620000005f, dirt_amount) + ::math::max(float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).y, ::math::pow(float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).x, 0.680000007f) * ::math::pow(1.f - vm_tex_infinite(texture_2d("./textures/plate_dirt.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float3(0.647000015f), 1.f, false, 2.20000005f).x, 0.969999969f)), ::math::pow(dirt_weight, 0.280000001f)), 0.f, 1.f)) * (1.f - pattern_shininess * float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).y)), ::math::lerp(0.639999986f, histogram_range(vm_tex_infinite(texture_2d("./textures/plate_dirt.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float3(0.647000015f), 1.f, false, 2.20000005f).x, roughness_variation * 0.400000006f, metal_roughness * 0.629999995f + 0.0500000007f) + roughness_variation * 0.299999982f * ::math::pow(1.f - float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).x, 1.26999998f), ::math::clamp(::math::lerp(1.f, histogram_scan_big(vm_tex_infinite(texture_2d("./textures/transition_noise.jpg", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float2(5.f)), float3(0.50999999f), 1.f, true, 2.20000005f).x, 0.620000005f, dirt_amount) + ::math::max(float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).y, ::math::pow(float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).x, 0.680000007f) * ::math::pow(1.f - vm_tex_infinite(texture_2d("./textures/plate_dirt.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float3(0.647000015f), 1.f, false, 2.20000005f).x, 0.969999969f)), ::math::pow(dirt_weight, 0.280000001f)), 0.f, 1.f)) * (1.f - pattern_shininess * float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).y) * (::math::lerp(0.639999986f, histogram_range(vm_tex_infinite(texture_2d("./textures/plate_dirt.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float3(0.647000015f), 1.f, false, 2.20000005f).x, roughness_variation * 0.400000006f, metal_roughness * 0.629999995f + 0.0500000007f) + roughness_variation * 0.299999982f * ::math::pow(1.f - float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).x, 1.26999998f), ::math::clamp(::math::lerp(1.f, histogram_scan_big(vm_tex_infinite(texture_2d("./textures/transition_noise.jpg", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float2(5.f)), float3(0.50999999f), 1.f, true, 2.20000005f).x, 0.620000005f, dirt_amount) + ::math::max(float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).y, ::math::pow(float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).x, 0.680000007f) * ::math::pow(1.f - vm_tex_infinite(texture_2d("./textures/plate_dirt.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float3(0.647000015f), 1.f, false, 2.20000005f).x, 0.969999969f)), ::math::pow(dirt_weight, 0.280000001f)), 0.f, 1.f)) * (1.f - pattern_shininess * float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).y)), color(0.387622833f, 0.387622833f, 0.387622833f), color(0.387622833f, 0.387622833f, 0.387622833f), ::state::texture_tangent_u(0), ::df::scatter_reflect), ::df::weighted_layer(1.f, ::df::diffuse_reflection_bsdf(vm_tex_lookup(texture_2d("./textures/dirt.jpg", ::tex::gamma_srgb), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float2(0.5f)), mono_average, float4(dirt_brightness * 0.620000005f + 0.0599999987f)).tint, 0.f), bsdf(), add_detail_normal(::math::lerp(vm_tex_normal_lookup(texture_2d("./textures/plate_dirt_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), 1.f), ::state::normal(), contrast_brightness(::math::pow(::math::clamp(::math::lerp(1.f, histogram_scan_big(vm_tex_infinite(texture_2d("./textures/transition_noise.jpg", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float2(5.f)), float3(0.50999999f), 1.f, true, 2.20000005f).x, 0.620000005f, dirt_amount) + ::math::max(float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).y, ::math::pow(float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).x, 0.680000007f) * ::math::pow(1.f - vm_tex_infinite(texture_2d("./textures/plate_dirt.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float3(0.647000015f), 1.f, false, 2.20000005f).x, 0.969999969f)), ::math::pow(dirt_weight, 0.280000001f)), 0.f, 1.f), 0.229999989f), 0.699999988f, 0.5f)), vm_tex_normal_lookup(shape_norm, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), 1.f))), add_detail_normal(::math::lerp(vm_tex_normal_lookup(texture_2d("./textures/plate_dirt_norm.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), 1.f), ::state::normal(), contrast_brightness(::math::pow(::math::clamp(::math::lerp(1.f, histogram_scan_big(vm_tex_infinite(texture_2d("./textures/transition_noise.jpg", ::tex::gamma_linear), vm_coord_post_scale(vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float2(5.f)), float3(0.50999999f), 1.f, true, 2.20000005f).x, 0.620000005f, dirt_amount) + ::math::max(float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).y, ::math::pow(float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).x, 0.680000007f) * ::math::pow(1.f - vm_tex_infinite(texture_2d("./textures/plate_dirt.jpg", ::tex::gamma_linear), vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), float3(0.647000015f), 1.f, false, 2.20000005f).x, 0.969999969f)), ::math::pow(dirt_weight, 0.280000001f)), 0.f, 1.f), 0.229999989f), 0.699999988f, 0.5f)), vm_tex_normal_lookup(shape_norm, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), 1.f))), material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+        material_surface tmp2 = material_surface(scattering: bsdf(), emission: material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+        color tmp3 = color(1.f, 1.f, 1.f);
+        material_volume tmp4 = material_volume(scattering: vdf(), absorption_coefficient: color(0.f, 0.f, 0.f), scattering_coefficient: color(0.f, 0.f, 0.f));
+        material_geometry tmp5(float3(0.f), float3(vm_tex_lookup(shape_multi_ao_height, vm_coord(texture_translate, texture_rotate, texture_rescale, uv_space_index), mono_a, float4(1.f)).tint).z, roundcorners_enable ? ::state::rounded_corner_normal(roundcorners_radius_mm * 0.00100000005f, roundcorners_across_materials, 1.f) : ::state::normal());
+    } in
+        material(
+            thin_walled: tmp0,
+            surface: tmp1,
+            backface: tmp2,
+            ior: tmp3,
+            volume: tmp4,
+            geometry: tmp5);
+
+
+
+// 2
+export material Punched_Circular_Plate_Glossy(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+    ::anno::display_name("Punched Circular Plate - Glossy"),
+	::anno::contributor("Rüdiger Raab"),
+    ::anno::description(DESCRIPTION),
+	::anno::key_words(string[]("metal", "plate", "diamond", "pattern", "safety", "bumped", "embossed", "infinite tiling", "architecture", "construction", "naval", "exterior", "gray", "glossy")), 
+	::anno::thumbnail("./.thumbs/Punched_Circular_Plate.Punched_Circular_Plate_Glossy.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]]
+= Punched_Circular_Plate (
+	metal_roughness:			   0.4f,
+	roughness_variation:           0.47f,
+	dirt_amount:                   0.0f,
+	dirt_weight:                   1.0f,
+	dirt_brightness:               0.38f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        1.5f,
+	roundcorners_across_materials: false
+);
+
+
+
+// 3
+export material Punched_Circular_Plate_Matte_Aged(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+    ::anno::display_name("Punched Circular Plate - Matte Aged"),
+	::anno::contributor("Rüdiger Raab"),
+    ::anno::description(DESCRIPTION),
+	::anno::key_words(string[]("metal", "plate", "diamond", "pattern", "safety", "bumped", "embossed", "infinite tiling", "architecture", "construction", "naval", "exterior", "matte", "aged", "gray")), 
+	::anno::thumbnail("./.thumbs/Punched_Circular_Plate.Punched_Circular_Plate_Matte_Aged.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]]
+= Punched_Circular_Plate (
+	metal_roughness:			   0.63f,
+	roughness_variation:           0.72f,
+	dirt_amount:                   0.0f,
+	dirt_weight:                   1.0f,
+	dirt_brightness:               0.4f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        1.5f,
+	roundcorners_across_materials: false
+);
+
+
+// 4
+export material Punched_Circular_Plate_Dirty_Worn(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+    ::anno::display_name("Punched Circular Plate - Dirty Worn"),
+	::anno::contributor("Rüdiger Raab"),
+    ::anno::description(DESCRIPTION),
+	::anno::key_words(string[]("metal", "plate", "diamond", "pattern", "safety", "bumped", "embossed", "infinite tiling", "architecture", "construction", "naval", "exterior", "gray", "worn", "old", "dirty", "decayed")), 
+	::anno::thumbnail("./.thumbs/Punched_Circular_Plate.Punched_Circular_Plate_Dirty_Worn.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]]
+= Punched_Circular_Plate (
+	metal_roughness:			   0.38f,
+	roughness_variation:           0.53f,
+	dirt_amount:                   0.38f,
+	dirt_weight:                   1.0f,
+	dirt_brightness:               0.4f,
+	texture_translate:             float2(0.0f),
+	texture_rotate:                0.0f,
+	texture_scale:                 float2(1.0f),
+	uv_space_index:                0,
+	roundcorners_enable:           false,
+	roundcorners_radius_mm:        1.5f,
+	roundcorners_across_materials: false
+);

@@ -1,0 +1,702 @@
+/******************************************************************************
+ *	 Copyright 2024 NVIDIA Corporation. All rights reserved.	 *
+ ******************************************************************************
+
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA's Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL,
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+
+mdl 1.7;
+
+import ::anno::*;
+import ::base::*;
+import ::df::*;
+import ::math::*;
+import ::state::*;
+import ::tex::*;
+import ::nvidia::core_definitions::blend_colors;
+import ::nvidia::core_definitions::dimension;
+
+
+const string COPYRIGHT =
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n"
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n"
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+const string DESCRIPTION = "A plastic material for printed circuit boards (PCB).";
+
+
+
+struct volume_info
+[[
+	::anno::hidden()
+]]
+{
+	color absorption_coefficient;
+	color scattering_coefficient;
+};
+
+volume_info volume_transmittance_albedo(
+	float density_scale = 1.0,
+	color transmittance = color(0.5f), // transmittance color after unit distance
+	color albedo = color(1.0f)
+)
+[[
+	anno::noinline()
+]]
+{
+	color sigma_t = -math::log(math::saturate(transmittance)) * density_scale;
+	color sigma_s = sigma_t * ::math::saturate(albedo);
+	return volume_info(
+		scattering_coefficient: sigma_s,
+		absorption_coefficient: sigma_t - sigma_s);
+}
+
+float remap(float input, float low, float high)
+{
+	//return low + input * (high - low);
+	return ::math::lerp(low, high, input);
+}
+
+float3 rgb2hsl(float3 c)
+[[
+	::anno::description("Converts a color value to HSL. The function outputs the hue to \n"
+						"lie in the range from 0.0-1.0."),
+	::anno::author("NVIDIA vMaterials")
+]]
+{
+	float3 hsl;
+	float cMax = ::math::max(::math::max(c.x, c.y), c.z);
+	float cMin = ::math::min(::math::min(c.x, c.y), c.z);
+	float delta = cMax - cMin;
+	
+	hsl.z = (cMax + cMin) / 2.0;	
+	hsl.x = ((cMax == cMin) ? 0 :
+		(cMax == c.x) ? (c.y - c.z) / delta + ((c.z > c.y) ? 6.0f : 0.0f):
+		(cMax == c.y) ? (c.z - c.x) / delta + 2.0 : (c.x - c.y) / delta + 4.0) / 6.0f;
+	hsl.y = (hsl.z == 0.0 || hsl.z == 1.0) ? 0.0 : delta / (1.0 - ::math::abs(2.0 * hsl.z - 1.0));
+	return hsl;
+}
+
+float f_n(float n, float a,  float h, float l) {
+	float k = ::math::fmod(n + h * 12.f, 12.f);
+	
+	return l - a * ::math::max(-1.0f, ::math::min(::math::min(k-3.0f, 9.0f-k), 1.0f));
+}
+
+
+color hsl2rgb(float3 hsl)
+[[
+	::anno::description("Converts a HSL value back to a color. Note that the hue is expected to \n"
+						"lie in the range from 0.0-1.0."),
+	::anno::author("NVIDIA vMaterials")
+]]
+{
+	float h = hsl.x, s = hsl.y, l = hsl.z;
+	float a = s * ::math::min(l, 1.0f - l);
+	return color(f_n(0.0, a, h, l),
+				f_n(8.0, a, h, l),
+				f_n(4.0, a, h, l));	
+}
+
+::base::texture_coordinate_info transform_coordinate_2(
+	float4x4 transform										 
+		[[ anno::description("A transformation to be applied to the source coordinates. rotation_translation_scale() is a suggested means to compute the transformation matrix.") ]],
+	::base::texture_coordinate_info coordinate = ::base::texture_coordinate_info()
+		[[ anno::description("Coordinate, typically sourced from coordinate_source or coordinate_projection.") ]]
+) [[ 
+	::anno::description("Transform a texture coordinate by a matrix.") ,
+	::anno::noinline()
+  ]]
+{
+	// Version 2
+	float4 r_position = transform * float4(coordinate.position.x,coordinate.position.y,coordinate.position.z,1);
+	//Hack: try aproximating it for the case that the rotation is only aroud z and assuming the texture layout is nice and z is ~constant.
+	//just pretend there is no other rotation happening
+	//get rid of scaling and translation. Then extract fields where sin and cos would be in a simple 2d transform around z.
+	float4 u = transform[0];
+	float3 ru = ::math::normalize(float3(u.x,u.y,u.z));
+	float cos =  ru.x; 
+	float sin =  -ru.y;
+	
+	
+	return ::base::texture_coordinate_info(
+		float3(r_position.x,r_position.y,r_position.z),
+		math::normalize(cos * coordinate.tangent_u - sin * coordinate.tangent_v),
+		math::normalize(cos * coordinate.tangent_v + sin * coordinate.tangent_u));
+}
+
+float histogram_range(float input, float range = 1.0f, float position = 0.5f)
+{	
+	float low = ::math::clamp(1.0 - ::math::min(((1.0 - position) + range * 0.5), (1.0 - position) * 2), 0.0, 1.0);
+	float high = ::math::clamp(math::min((position + range * 0.5 ), position * 2.0), 0.0, 1.0);
+	return ::math::lerp(low, high, input);
+}
+
+::base::texture_coordinate_info vmat_transform(
+								float2 translation = float2(0.0, 0.0),
+								float rotation	 = 0.0,				// rotation in degrees
+								float2 scaling	 = float2(1.0, 1.0),
+								uniform ::base::texture_coordinate_system system = ::base::texture_coordinate_uvw,
+								uniform int uv_space	   = 0
+)
+{
+	float rotation_rad = (rotation * 3.1415926535897932384626433832f) / 180.f;
+	float4x4 scale =
+	float4x4(1.0 /scaling.x, 0.			 ,  0. ,	 0.,
+			 0.			, 1.0 /scaling.y ,  0. ,	 0.,
+			 0.			, 0.			 ,  1.0,	 0.,
+			 translation.x , translation.y  ,  0.0,	 1.);
+
+	float s = ::math::sin(rotation_rad);
+	float c = ::math::cos(rotation_rad);
+	float4x4 rotate =
+	float4x4(  c  ,  -s   , 0.0 , 0.0,
+			   s  ,   c   , 0.0 , 0.0,
+			   0.0,   0.0 , 1.0 , 0.0,
+			   0. ,   0.0 , 0.0 , 1.);
+	
+	return transform_coordinate_2(scale*rotate, ::base::coordinate_source(system, uv_space));
+}
+
+
+export material PCB_Solder_Mask(
+	color diffuse_color = color(0.002732f, 0.223228f, 0.003677f) [[
+		::anno::description("Sets the color of the solder mask."),
+		::anno::display_name("Color"),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(0)
+	]],
+	float reflection_roughness = .4f [[
+		::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+		::anno::display_name("Roughness"),
+		::anno::in_group("Appearance"),
+		::anno::soft_range(0.f, 1.f),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(1)
+	]],
+	uniform float bump_strength = .0f [[
+		::anno::description("Specifies the strength of the bump."),
+		::anno::display_name("Bump Strength"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::soft_range(0.f, 1.f),
+		::anno::ui_order(2)
+	]],
+	uniform bool subsurface_scattering = true [[
+		::anno::description("Enable light that penetrates the surface of a translucent object. While set to True it\'s a physically correct calculated SSS effect. If set to False it\'s a diffuse transmission that is cheaper to perform."),
+		::anno::display_name("Subsurface Scattering"),
+		::anno::in_group("Advanced"),
+		::anno::ui_order(3)
+	]],
+	float translucency_amount = 0.7f [[
+		::anno::description("Adjusts how much light may pass through the material."),
+		::anno::display_name("Transluceny Amount"),
+		::anno::in_group("Advanced"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(4)
+	]],
+	float density_scale = 1.f [[
+		::anno::description("Adjusts the density of the material. High makes the material denser and thus light travel less far until it is exhausted."),
+		::anno::display_name("Density Scale"),
+		::anno::in_group("Advanced"),
+		::anno::soft_range(0.f, 1.f),
+		::anno::ui_order(5)
+	]],
+	uniform float2 texture_translate = float2(0.f) [[
+		::anno::description("Controls the position of the texture."),
+		::anno::display_name("Texture Translate"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(6)
+	]],
+	uniform float texture_rotate = 0.f [[
+		::anno::description("Rotates angle of the texture in degrees."),
+		::anno::display_name("Texture Rotate"),
+		::anno::in_group("Transform"),
+		::anno::soft_range(0.f, 360.f),
+		::anno::ui_order(7)
+	]],
+	uniform float2 texture_scale = float2(1.f) [[
+		::anno::description("Larger numbers increase the size."),
+		::anno::display_name("Texture Scale"),
+		::nvidia::core_definitions::dimension(float2(.1f, .1f)),
+		::anno::in_group("Transform"),
+		::anno::ui_order(8)
+	]],
+	uniform int uv_space_index = 0 [[
+		::anno::description("Use selected UV space for material."),
+		::anno::display_name("UV Space Index"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(9)
+	]],
+	uniform bool enable_round_corners = false [[
+		::anno::description("Enables the round corner effect. Comes at a slight performance cost as additional raytracing calls are required to evaluate the round corner effect."),
+		::anno::display_name("Round Corners"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(10)
+	]],
+	uniform float radius = 1.5f [[
+		::anno::description("Radius of the rounded corners in millimeters (mm)."),
+		::anno::display_name("Radius mm"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(11)
+	]],
+	uniform bool across_materials = false [[
+		::anno::description("Applies the round corner effect across different materials when enabled."),
+		::anno::display_name("Across Materials"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(12)
+	]],
+	uniform bool no_uv = false [[
+		::anno::description("Set this to true if your model has no UV layout."),
+		::anno::display_name("No UV"),
+		::anno::in_group("Transform", "Projection"),
+		::anno::ui_order(13)
+	]],
+	uniform base::texture_coordinate_system coordinate_system = base::texture_coordinate_object [[
+		::anno::description("The projection can be done based on world or object space. Do not use uvw space. Since it is disabled while No UV is set to true."),
+		::anno::display_name("Coordinate System"),
+		::anno::in_group("Transform", "Projection"),
+		::anno::ui_order(14)
+	]],
+	uniform base::projection_mode projection_type = base::projection_planar [[
+		::anno::description("Projection method to be used to generate the coordinates."),
+		::anno::display_name("Projection Type"),
+		::anno::in_group("Transform", "Projection"),
+		::anno::ui_order(15)
+	]],
+	uniform float scale = 1.f [[
+		::anno::description("Scales the texture while No UV is true."),
+		::anno::display_name("Scale Projection"),
+		::anno::in_group("Transform", "Projection"),
+		::anno::ui_order(16)
+	]])
+[[
+		::anno::description(DESCRIPTION),
+		::anno::display_name("PCB Solder Mask - Green"),
+		::anno::copyright_notice(COPYRIGHT),
+		::anno::key_words(string[]("dielectric", "pcb", "computer", "plastic", "translucency", "green", "technical", "electronic", "plate", "construction", "mask", "printed", "circuit", "boards", "hardware")),
+		::anno::thumbnail("./.thumbs/PCB_Solder_Mask.PCB_Solder_Mask.png"),
+		::anno::author("Nvidia vMaterials"),
+		::anno::contributor("Maik Rohland"),
+		::anno::contributor("Ruediger Raab")
+]]
+ = 
+	let {
+		bool tmp0 = false;
+		material_surface tmp1(df::custom_curve_layer(0.0399999991f, 1.f, 5.f, 1.f, df::microfacet_ggx_smith_bsdf(histogram_range(float3(base::file_texture(texture_2d("./textures/pcb_solder_mask_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, no_uv ? base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale * 0.0500000007f, base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false, 0.f, int2(0), tex::wrap_repeat, 30.f).tint)[0], 1.f, reflection_roughness) * histogram_range(float3(base::file_texture(texture_2d("./textures/pcb_solder_mask_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, no_uv ? base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale * 0.0500000007f, base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false, 0.f, int2(0), tex::wrap_repeat, 30.f).tint)[0], 1.f, reflection_roughness), histogram_range(float3(base::file_texture(texture_2d("./textures/pcb_solder_mask_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, no_uv ? base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale * 0.0500000007f, base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false, 0.f, int2(0), tex::wrap_repeat, 30.f).tint)[0], 1.f, reflection_roughness) * histogram_range(float3(base::file_texture(texture_2d("./textures/pcb_solder_mask_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, no_uv ? base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale * 0.0500000007f, base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false, 0.f, int2(0), tex::wrap_repeat, 30.f).tint)[0], 1.f, reflection_roughness), color(1.f, 1.f, 1.f), color(0.f, 0.f, 0.f), state::texture_tangent_u(0), df::scatter_reflect), df::weighted_layer(translucency_amount * 0.5f, df::diffuse_transmission_bsdf(hsl2rgb(float3(rgb2hsl(float3(math::clamp(nvidia::core_definitions::blend_colors(base::file_texture(texture_2d("./textures/pcb_solder_mask_SSS.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, no_uv ? base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale * 0.0500000007f, base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false, 0.f, int2(0), tex::wrap_repeat, 30.f).tint, diffuse_color, base::color_layer_multiply, 1.f, true).tint, color(0.000303999986f, 0.000302f, 0.000302f), color(0.99110198f, 0.99110198f, 0.99110198f)))).x, math::lerp(0.f, 0.979999959f, rgb2hsl(float3(math::clamp(nvidia::core_definitions::blend_colors(base::file_texture(texture_2d("./textures/pcb_solder_mask_SSS.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, no_uv ? base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale * 0.0500000007f, base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false, 0.f, int2(0), tex::wrap_repeat, 30.f).tint, diffuse_color, base::color_layer_multiply, 1.f, true).tint, color(0.000303999986f, 0.000302f, 0.000302f), color(0.99110198f, 0.99110198f, 0.99110198f)))).y), math::lerp(0.629999995f, 1.f, rgb2hsl(float3(math::clamp(nvidia::core_definitions::blend_colors(base::file_texture(texture_2d("./textures/pcb_solder_mask_SSS.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, no_uv ? base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale * 0.0500000007f, base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false, 0.f, int2(0), tex::wrap_repeat, 30.f).tint, diffuse_color, base::color_layer_multiply, 1.f, true).tint, color(0.000303999986f, 0.000302f, 0.000302f), color(0.99110198f, 0.99110198f, 0.99110198f)))).z)))), df::diffuse_reflection_bsdf(nvidia::core_definitions::blend_colors(base::file_texture(texture_2d("./textures/pcb_solder_mask_grey_diff.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, no_uv ? base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale * 0.0500000007f, base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false, 0.f, int2(0), tex::wrap_repeat, 30.f).tint, diffuse_color, base::color_layer_multiply, 1.f, true).tint, 0.f), base::tangent_space_normal_texture(texture_2d("./textures/pcb_solder_mask_norm.jpg", ::tex::gamma_linear), math::lerp(0.f, 2.f, bump_strength), false, false, no_uv ? base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale * 0.0500000007f, base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false, 1.f, 0.f, 0.f, int2(0), tex::wrap_repeat, 30.f)), base::tangent_space_normal_texture(texture_2d("./textures/pcb_solder_mask_norm.jpg", ::tex::gamma_linear), math::lerp(0.f, 2.f, bump_strength), false, false, no_uv ? base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale * 0.0500000007f, base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false, 1.f, 0.f, 0.f, int2(0), tex::wrap_repeat, 30.f)), material_emission(emission: edf(), intensity: color(0.214040995f, 0.00203699991f, 0.00203699991f), mode: intensity_radiant_exitance));
+		material_surface tmp2 = material_surface(scattering: bsdf(), emission: material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		color tmp3 = color(2.38333201f, 2.38333201f, 2.38333201f);
+		material_volume tmp4 = subsurface_scattering ? material_volume(vdf(), volume_transmittance_albedo(remap(density_scale, 0.f, 80.f), color(0.00489600003f, 0.00489600003f, 0.00489600003f), math::clamp(hsl2rgb(float3(rgb2hsl(float3(math::clamp(nvidia::core_definitions::blend_colors(base::file_texture(texture_2d("./textures/pcb_solder_mask_SSS.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, no_uv ? base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale * 0.0500000007f, base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false, 0.f, int2(0), tex::wrap_repeat, 30.f).tint, diffuse_color, base::color_layer_multiply, 1.f, true).tint, color(0.000303999986f, 0.000302f, 0.000302f), color(0.99110198f, 0.99110198f, 0.99110198f)))).x, math::lerp(0.0399999991f, 0.969999969f, rgb2hsl(float3(math::clamp(nvidia::core_definitions::blend_colors(base::file_texture(texture_2d("./textures/pcb_solder_mask_SSS.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, no_uv ? base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale * 0.0500000007f, base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false, 0.f, int2(0), tex::wrap_repeat, 30.f).tint, diffuse_color, base::color_layer_multiply, 1.f, true).tint, color(0.000303999986f, 0.000302f, 0.000302f), color(0.99110198f, 0.99110198f, 0.99110198f)))).y), math::lerp(0.539999962f, 0.939999998f, rgb2hsl(float3(math::clamp(nvidia::core_definitions::blend_colors(base::file_texture(texture_2d("./textures/pcb_solder_mask_SSS.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, no_uv ? base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale * 0.0500000007f, base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false, 0.f, int2(0), tex::wrap_repeat, 30.f).tint, diffuse_color, base::color_layer_multiply, 1.f, true).tint, color(0.000303999986f, 0.000302f, 0.000302f), color(0.99110198f, 0.99110198f, 0.99110198f)))).z))), color(0.f, 0.f, 0.f), color(0.955973983f, 0.955973983f, 0.955973983f))).absorption_coefficient, volume_transmittance_albedo(remap(density_scale, 0.f, 80.f), color(0.00489600003f, 0.00489600003f, 0.00489600003f), math::clamp(hsl2rgb(float3(rgb2hsl(float3(math::clamp(nvidia::core_definitions::blend_colors(base::file_texture(texture_2d("./textures/pcb_solder_mask_SSS.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, no_uv ? base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale * 0.0500000007f, base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false, 0.f, int2(0), tex::wrap_repeat, 30.f).tint, diffuse_color, base::color_layer_multiply, 1.f, true).tint, color(0.000303999986f, 0.000302f, 0.000302f), color(0.99110198f, 0.99110198f, 0.99110198f)))).x, math::lerp(0.0399999991f, 0.969999969f, rgb2hsl(float3(math::clamp(nvidia::core_definitions::blend_colors(base::file_texture(texture_2d("./textures/pcb_solder_mask_SSS.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, no_uv ? base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale * 0.0500000007f, base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false, 0.f, int2(0), tex::wrap_repeat, 30.f).tint, diffuse_color, base::color_layer_multiply, 1.f, true).tint, color(0.000303999986f, 0.000302f, 0.000302f), color(0.99110198f, 0.99110198f, 0.99110198f)))).y), math::lerp(0.539999962f, 0.939999998f, rgb2hsl(float3(math::clamp(nvidia::core_definitions::blend_colors(base::file_texture(texture_2d("./textures/pcb_solder_mask_SSS.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, no_uv ? base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale * 0.0500000007f, base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false, 0.f, int2(0), tex::wrap_repeat, 30.f).tint, diffuse_color, base::color_layer_multiply, 1.f, true).tint, color(0.000303999986f, 0.000302f, 0.000302f), color(0.99110198f, 0.99110198f, 0.99110198f)))).z))), color(0.f, 0.f, 0.f), color(0.955973983f, 0.955973983f, 0.955973983f))).scattering_coefficient, color(0.f, 0.f, 0.f)) : material_volume(vdf(), volume_transmittance_albedo(remap(density_scale, 0.f, 80.f), color(0.99110198f, 0.99110198f, 0.99110198f), color(0.f, 0.f, 0.f)).absorption_coefficient, volume_transmittance_albedo(remap(density_scale, 0.f, 80.f), color(0.99110198f, 0.99110198f, 0.99110198f), color(0.f, 0.f, 0.f)).scattering_coefficient, color(0.f, 0.f, 0.f));
+		material_geometry tmp5(float3(0.f), 1.f, enable_round_corners ? state::rounded_corner_normal(radius * 0.00100000005f, across_materials, 1.f) : state::normal());
+		
+	} in
+		material(
+			thin_walled: tmp0,
+			surface: tmp1,
+			backface: tmp2,
+			ior: tmp3,
+			volume: tmp4,
+			geometry: tmp5);
+			
+			
+
+export material PCB_Solder_Mask_Green_Fast(*)
+
+[[
+	::anno::display_name("PCB Solder Mask - Green Fast"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::key_words(string[]("dielectric", "pcb", "computer", "plastic", "translucency", "green", "fast", "technical", "electronic", "plate", "construction", "mask", "printed", "circuit", "boards", "hardware")),
+	::anno::thumbnail("./.thumbs/PCB_Solder_Mask.PCB_Solder_Mask_Green_Fast.png"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab")
+]]
+= PCB_Solder_Mask
+(
+	diffuse_color: color(0.012983f, 0.304987f, 0.012983f),
+	reflection_roughness: .4f,
+	bump_strength: .4f,
+	subsurface_scattering: false,
+	translucency_amount: .3f,
+	density_scale: .5f,
+	texture_translate: float2(0.0f),
+	texture_rotate: 0.0f,
+	texture_scale: float2(1.0f),
+	uv_space_index: 0,
+	enable_round_corners: false,
+	radius: 1.5f,
+	across_materials: false,
+	no_uv: false,
+	coordinate_system: base::texture_coordinate_object,
+	projection_type: base::projection_planar,
+	scale: 1.f
+);			
+ 
+export material PCB_Solder_Mask_Black(*)
+
+[[
+	::anno::display_name("PCB Solder Mask - Black"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::key_words(string[]("dielectric", "pcb", "computer", "plastic", "translucency", "black", "technical", "electronic", "plate", "construction", "mask", "printed", "circuit", "boards", "hardware")),
+	::anno::thumbnail("./.thumbs/PCB_Solder_Mask.PCB_Solder_Mask_Black.png"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab")
+]]
+= PCB_Solder_Mask
+(
+	diffuse_color: color(0.012983f, 0.304987f, 0.012983f),
+	reflection_roughness: .3f,
+	bump_strength: .3f,
+	subsurface_scattering: true,
+	translucency_amount: .5f,
+	density_scale: 1.f,
+	texture_translate: float2(0.0f),
+	texture_rotate: 0.0f,
+	texture_scale: float2(1.0f),
+	uv_space_index: 0,
+	enable_round_corners: false,
+	radius: 1.5f,
+	across_materials: false,
+	no_uv: false,
+	coordinate_system: base::texture_coordinate_object,
+	projection_type: base::projection_planar,
+	scale: 1.f
+);  
+
+export material PCB_Solder_Mask_Black_Fast(*)
+
+[[
+	::anno::display_name("PCB Solder Mask - Black Fast"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::key_words(string[]("dielectric", "pcb", "computer", "plastic", "translucency", "black", "technical", "electronic", "plate", "construction", "fast", "mask", "printed", "circuit", "boards", "hardware")),
+	::anno::thumbnail("./.thumbs/PCB_Solder_Mask.PCB_Solder_Mask_Black_Fast.png"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab")
+]]
+= PCB_Solder_Mask
+(
+	diffuse_color: color(0.012983f, 0.012983f, 0.012983f),
+	reflection_roughness: .3f,
+	bump_strength: .3f,
+	subsurface_scattering: false,
+	translucency_amount: .3f,
+	density_scale: 1.f,
+	texture_translate: float2(0.0f),
+	texture_rotate: 0.0f,
+	texture_scale: float2(1.0f),
+	uv_space_index: 0,
+	enable_round_corners: false,
+	radius: 1.5f,
+	across_materials: false,
+	no_uv: false,
+	coordinate_system: base::texture_coordinate_object,
+	projection_type: base::projection_planar,
+	scale: 1.f
+); 
+
+
+export material PCB_Solder_Mask_Yellow(*)
+
+[[
+	::anno::display_name("PCB Solder Mask - Yellow"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::key_words(string[]("dielectric", "pcb", "computer", "plastic", "translucency", "yellow", "technical", "electronic", "plate", "construction", "mask", "printed", "circuit", "boards", "hardware")),
+	::anno::thumbnail("./.thumbs/PCB_Solder_Mask.PCB_Solder_Mask_Yellow.png"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab")
+]]
+= PCB_Solder_Mask
+(
+	diffuse_color: color(0.871367f, 0.871367f, 0.012983f),
+	reflection_roughness: .3f,
+	bump_strength: .3f,
+	subsurface_scattering: true,
+	translucency_amount: .75f,
+	density_scale: 1.f,
+	texture_translate: float2(0.0f),
+	texture_rotate: 0.0f,
+	texture_scale: float2(1.0f),
+	uv_space_index: 0,
+	enable_round_corners: false,
+	radius: 1.5f,
+	across_materials: false,
+	no_uv: false,
+	coordinate_system: base::texture_coordinate_object,
+	projection_type: base::projection_planar,
+	scale: 1.f
+); 
+
+export material PCB_Solder_Mask_Yellow_Fast(*)
+
+[[
+	::anno::display_name("PCB Solder Mask - Yellow Fast"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::key_words(string[]("dielectric", "pcb", "computer", "plastic", "translucency", "yellow", "technical", "electronic", "plate", "fast", "construction", "mask", "printed", "circuit", "boards", "hardware")),
+	::anno::thumbnail("./.thumbs/PCB_Solder_Mask.PCB_Solder_Mask_Yellow_Fast.png"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab")
+]]
+= PCB_Solder_Mask
+(
+	diffuse_color: color(0.871367f, 0.871367f, 0.012983f),
+	reflection_roughness: .3f,
+	bump_strength: .3f,
+	subsurface_scattering: false,
+	translucency_amount: .3f,
+	density_scale: 1.f,
+	texture_translate: float2(0.0f),
+	texture_rotate: 0.0f,
+	texture_scale: float2(1.0f),
+	uv_space_index: 0,
+	enable_round_corners: false,
+	radius: 1.5f,
+	across_materials: false,
+	no_uv: false,
+	coordinate_system: base::texture_coordinate_object,
+	projection_type: base::projection_planar,
+	scale: 1.f
+); 
+
+export material PCB_Solder_Mask_Red_Fast(*)
+
+[[
+	::anno::display_name("PCB Solder Mask - Red Fast"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::key_words(string[]("dielectric", "pcb", "computer", "plastic", "translucency", "red", "technical", "electronic", "plate", "fast", "construction", "mask", "printed", "circuit", "boards", "hardware")),
+	::anno::thumbnail("./.thumbs/PCB_Solder_Mask.PCB_Solder_Mask_Red_Fast.png"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab")
+]]
+= PCB_Solder_Mask
+(
+	diffuse_color: color(0.871367f, 0.012983f, 0.012983f),
+	reflection_roughness: .3f,
+	bump_strength: .3f,
+	subsurface_scattering: false,
+	translucency_amount: .3f,
+	density_scale: 1.f,
+	texture_translate: float2(0.0f),
+	texture_rotate: 0.0f,
+	texture_scale: float2(1.0f),
+	uv_space_index: 0,
+	enable_round_corners: false,
+	radius: 1.5f,
+	across_materials: false,
+	no_uv: false,
+	coordinate_system: base::texture_coordinate_object,
+	projection_type: base::projection_planar,
+	scale: 1.f
+); 
+
+export material PCB_Solder_Mask_Red(*)
+
+[[
+	::anno::display_name("PCB Solder Mask - Red"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::key_words(string[]("dielectric", "pcb", "computer", "plastic", "translucency", "red", "technical", "electronic", "plate", "construction", "mask", "printed", "circuit", "boards", "hardware")),
+	::anno::thumbnail("./.thumbs/PCB_Solder_Mask.PCB_Solder_Mask_Red.png"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab")
+]]
+= PCB_Solder_Mask
+(
+	diffuse_color: color(0.871367f, 0.012983f, 0.012983f),
+	reflection_roughness: .3f,
+	bump_strength: .3f,
+	subsurface_scattering: true,
+	translucency_amount: .5f,
+	density_scale: .75f,
+	texture_translate: float2(0.0f),
+	texture_rotate: 0.0f,
+	texture_scale: float2(1.0f),
+	uv_space_index: 0,
+	enable_round_corners: false,
+	radius: 1.5f,
+	across_materials: false,
+	no_uv: false,
+	coordinate_system: base::texture_coordinate_object,
+	projection_type: base::projection_planar,
+	scale: 1.f
+); 
+
+export material PCB_Solder_Mask_Blue(*)
+
+[[
+	::anno::display_name("PCB Solder Mask - Blue"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::key_words(string[]("dielectric", "pcb", "computer", "plastic", "translucency", "blue", "technical", "electronic", "plate", "construction", "mask", "printed", "circuit", "boards", "hardware")),
+	::anno::thumbnail("./.thumbs/PCB_Solder_Mask.PCB_Solder_Mask_Blue.png"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab")
+]]
+= PCB_Solder_Mask
+(
+	diffuse_color: color(0.012983f, 0.013702f, 0.577580f),
+	reflection_roughness: .3f,
+	bump_strength: .3f,
+	subsurface_scattering: true,
+	translucency_amount: .5f,
+	density_scale: 1.f,
+	texture_translate: float2(0.0f),
+	texture_rotate: 0.0f,
+	texture_scale: float2(1.0f),
+	uv_space_index: 0,
+	enable_round_corners: false,
+	radius: 1.5f,
+	across_materials: false,
+	no_uv: false,
+	coordinate_system: base::texture_coordinate_object,
+	projection_type: base::projection_planar,
+	scale: 1.f
+); 
+
+export material PCB_Solder_Mask_Blue_Fast(*)
+
+[[
+	::anno::display_name("PCB Solder Mask - Blue Fast"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::key_words(string[]("dielectric", "pcb", "computer", "plastic", "translucency", "blue", "fast", "technical", "electronic", "plate", "construction", "mask", "printed", "circuit", "boards", "hardware")),
+	::anno::thumbnail("./.thumbs/PCB_Solder_Mask.PCB_Solder_Mask_Blue_Fast.png"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab")
+]]
+= PCB_Solder_Mask
+(
+	diffuse_color: color(0.012983f, 0.013702f, 0.577580f),
+	reflection_roughness: .3f,
+	bump_strength: .3f,
+	subsurface_scattering: true,
+	translucency_amount: .3f,
+	density_scale: 1.f,
+	texture_translate: float2(0.0f),
+	texture_rotate: 0.0f,
+	texture_scale: float2(1.0f),
+	uv_space_index: 0,
+	enable_round_corners: false,
+	radius: 1.5f,
+	across_materials: false,
+	no_uv: false,
+	coordinate_system: base::texture_coordinate_object,
+	projection_type: base::projection_planar,
+	scale: 1.f
+); 
+
+export material PCB_Solder_Mask_White(*)
+
+[[
+	::anno::display_name("PCB Solder Mask - White"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::key_words(string[]("dielectric", "pcb", "computer", "plastic", "translucency", "white", "technical", "electronic", "plate", "construction", "mask", "printed", "circuit", "boards", "hardware")),
+	::anno::thumbnail("./.thumbs/PCB_Solder_Mask.PCB_Solder_Mask_White.png"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab")
+]]
+= PCB_Solder_Mask
+(
+	diffuse_color: color(0.955973f, 0.955973f, 0.955973f),
+	reflection_roughness: .3f,
+	bump_strength: .3f,
+	subsurface_scattering: true,
+	translucency_amount: .8f,
+	density_scale: 1.f,
+	texture_translate: float2(0.0f),
+	texture_rotate: 0.0f,
+	texture_scale: float2(1.0f),
+	uv_space_index: 0,
+	enable_round_corners: false,
+	radius: 1.5f,
+	across_materials: false,
+	no_uv: false,
+	coordinate_system: base::texture_coordinate_object,
+	projection_type: base::projection_planar,
+	scale: 1.f
+); 
+
+export material PCB_Solder_Mask_White_Fast(*)
+
+[[
+	::anno::display_name("PCB Solder Mask - White Fast"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::key_words(string[]("dielectric", "pcb", "computer", "plastic", "translucency", "white", "fast", "technical", "electronic", "plate", "construction", "mask", "printed", "circuit", "boards", "hardware")),
+	::anno::thumbnail("./.thumbs/PCB_Solder_Mask.PCB_Solder_Mask_White_Fast.png"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab")
+]]
+= PCB_Solder_Mask
+(
+	diffuse_color: color(0.955973f, 0.955973f, 0.955973f),
+	reflection_roughness: .3f,
+	bump_strength: .3f,
+	subsurface_scattering: false,
+	translucency_amount: .3f,
+	density_scale: 1.f,
+	texture_translate: float2(0.0f),
+	texture_rotate: 0.0f,
+	texture_scale: float2(1.0f),
+	uv_space_index: 0,
+	enable_round_corners: false,
+	radius: 1.5f,
+	across_materials: false,
+	no_uv: false,
+	coordinate_system: base::texture_coordinate_object,
+	projection_type: base::projection_planar,
+	scale: 1.f
+); 

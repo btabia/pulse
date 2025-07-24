@@ -1,0 +1,469 @@
+/******************************************************************************
+ *			Copyright 2024 NVIDIA Corporation. All rights reserved.		   *
+ ******************************************************************************
+
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA’s Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL,
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+
+mdl 1.5;
+
+import ::anno::*;
+import ::base::*;
+import ::df::*;
+import ::math::*;
+import ::state::*;
+import ::tex::*;
+import ::nvidia::core_definitions::blend_colors;
+import ::nvidia::core_definitions::dimension;
+
+
+
+
+const string COPYRIGHT =
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n"
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n"
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+		
+const string DESCRIPTION = "A paper material for cardboards";
+
+int lowbias32(int x)
+{
+	x ^= x >>> 16;
+	x *= 0x7feb352d;
+	x ^= x >>> 15;
+	x *= 0x846ca68b;
+	x ^= x >>> 16;
+	return x;
+}
+
+float uint2float(int x)
+{
+	return float(x & 0x7FFFFFFF) + (x < 0 ? 2147483648.0 : 0.0);
+}
+
+float3 srgb2rgb(float3 val) 
+{
+	return ::math::pow(::math::max(val, float3(0.0f)), 2.2);
+}
+
+float2 rnd22(int2 p) {
+	float2 ret_val = float2(
+		uint2float(lowbias32(p[0] + lowbias32(p[1]))) / 4294967296.f,
+		uint2float(lowbias32(p[0] + 32000 + lowbias32(p[1]))) / 4294967296.f
+	);
+	return ret_val;
+}	
+
+float2x2 invert_2x2(float2x2 M)
+{
+	float det = M[0][0]*M[1][1] - M[0][1]*M[1][0];
+	//https://www.chilimath.com/lessons/advanced-algebra/inverse-of-a-2x2-matrix/
+	return (1.0 / det) * float2x2(M[1][1], -M[0][1], -M[1][0], M[0][0]);
+}
+
+float3 nonrepeat_lookup(
+	uniform texture_2d texture = texture_2d(),
+	::base::texture_coordinate_info uvw = ::base::coordinate_source(),
+	float texture_scale = 1.0,
+	float3 average_color = float3(0.5),
+	float patch_size = 8.0
+)
+{
+	
+	float2 uv_in = float2(uvw.position[0], uvw.position[1]) * texture_scale;
+	float Z =  patch_size;	 // patch scale inside example texture
+	
+	float3 O = float3(0.f);
+	float2x2 M0 = float2x2(1.f,0.f, 0.5f, ::math::sqrt(3.f)/2.f);
+	float2x2 M = invert_2x2(M0); // transform matrix <-> tilted space
+	
+	float2 U = uv_in;
+	float2 V = M * uv_in; //pre-tilted hexa coordinates
+	int2 I = int2(::math::floor(V)); // hexa-tile id
+	
+	// The mean color needs to be determined in Photoshop then to make the
+	// average color work out, take the float value and calculate the apropriate
+	// mean value as (value^(1/2.2))
+
+	float3 m = average_color;
+	
+	float3 F = float3(::math::frac(V)[0], ::math::frac(V)[1], 0.f), W;
+	F[2] = 1.0 - F[0] - F[1]; // local hexa coordinates
+	
+	if( F[2] > 0.f )
+		O = (W[0] = F[2]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I))) - m)
+		  + (W[1] = F[1]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(0,1)))) - m)
+		  + (W[2] = F[0]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(1,0)))) - m);
+	else
+		O = (W[0] =	  -F[2]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(1))))   - m)
+		  + (W[1] = 1.f - F[1]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(1, 0)))) - m)
+		  + (W[2] = 1.f - F[0]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(0, 1)))) - m);
+	O = m + O/::math::length(W);
+	O = ::math::clamp( (O), 0.0, 1.0);
+	
+	return float3(O);
+}
+
+color endless_texture(
+	uniform texture_2d texture = texture_2d(),
+	::base::texture_coordinate_info uvw = ::base::coordinate_source(),
+	float texture_scale = 10.0,
+	float3 average_color = float3(0.5, 0.5, .5),
+	float patch_size = 8.0,
+	bool gamma_correct_lookup = true
+)
+{
+	return gamma_correct_lookup ? color(srgb2rgb(
+			nonrepeat_lookup (
+				texture: texture,
+				uvw: uvw,
+				texture_scale: texture_scale,
+				average_color: average_color,
+				patch_size: patch_size
+			))
+		) : color(nonrepeat_lookup (
+			texture: texture,
+			uvw: uvw,
+			texture_scale: texture_scale,
+			average_color: average_color,
+			patch_size: patch_size
+		));
+}
+
+float3 normalmap_normal(
+	uniform texture_2d texture,
+	float factor = 1.0,
+	::base::texture_coordinate_info uvw = ::base::texture_coordinate_info()
+)
+{
+	float3 lookup = (::tex::lookup_float3(texture, float2(uvw.position.x, uvw.position.y)) - 0.5) * (factor * 2.0);
+	return ::math::normalize(uvw.tangent_u * lookup.x + uvw.tangent_v * lookup.y + ::state::normal());
+}
+
+::base::texture_coordinate_info vmat_transform(
+								uniform float2 translation = float2(0.0, 0.0),
+								uniform float rotation	 = 0.0,
+								uniform float2 scaling	 = float2(1.0, 1.0),
+								uniform ::base::texture_coordinate_system system = ::base::texture_coordinate_uvw,
+								uniform int uv_space	   = 0
+)
+{
+	float rotation_rad = (rotation * 3.1415926535897932384626433832f) / 180.f;
+	
+	float4x4 scale =
+	float4x4(1.0 /scaling.x, 0.			 ,  0. ,	 0.,
+			 0.			, 1.0 /scaling.y ,  0. ,	 0.,
+			 0.			, 0.			 ,  1.0,	 0.,
+			 translation.x , translation.y  ,  0.0,	 1.);
+
+	float s = ::math::sin(rotation_rad);
+	float c = ::math::cos(rotation_rad);
+	float4x4 rotate =
+	float4x4(  c  ,  -s   , 0.0 , 0.0,
+			   s  ,   c   , 0.0 , 0.0,
+			   0.0,   0.0 , 1.0 , 0.0,
+			   0. ,   0.0 , 0.0 , 1.);
+	
+	return ::base::transform_coordinate(scale*rotate, ::base::coordinate_source(system, uv_space));
+}
+
+float3 transform_internal_to_tangent(float3 n)
+[[ 
+	::anno::hidden() 
+]]
+{
+	return
+		n.x* float3(::state::texture_tangent_u(0).x,::state::texture_tangent_v(0).x,::state::normal().x)+
+		n.y* float3(::state::texture_tangent_u(0).y,::state::texture_tangent_v(0).y,::state::normal().y)+
+		n.z* float3(::state::texture_tangent_u(0).z,::state::texture_tangent_v(0).z,::state::normal().z);
+}
+
+float3 transform_tangent_to_internal(float3 n)
+[[ 
+	::anno::hidden() 
+]]
+{
+	return  ::state::texture_tangent_u(0) * n.x +
+			::state::texture_tangent_v(0) * n.y +
+			::state::normal() * n.z ;
+}
+
+float3 add_detail_normal(float3 nd = ::state::normal(), float3 n = ::state::normal())
+{
+	// http://blog.selfshadow.com/publications/blending-in-detail/
+	float3 n_t = transform_internal_to_tangent(n);
+	float3 nd_t = transform_internal_to_tangent(nd);
+
+	n_t=n_t + float3(0.,0.,1.);
+	nd_t = nd_t *  float3(-1.,-1.,1.);
+	n = n_t*::math::dot(n_t, nd_t)/n_t.z - nd_t;
+	return ::math::normalize(transform_tangent_to_internal(n));
+}
+
+float histogram_range(float input, float range, float position)
+{	
+	float low = ::math::clamp(1.0 - ::math::min(((1.0 - position) + range * 0.5), (1.0 - position) * 2), 0.0, 1.0);
+	float high = ::math::clamp(::math::min((position + range * 0.5 ), position * 2.0), 0.0, 1.0);
+	return ::math::lerp(low, high, input);
+}
+
+export material Cardboard_Low_Quality(
+	uniform float diffuse_brightness = 1.f [[
+	  ::anno::description("Adjusts the lightness of the material."),
+	  ::anno::display_name("Brightness"),
+	  ::anno::in_group("Appearance"),
+	  ::anno::hard_range(0.f, 1.f),
+	  ::anno::ui_order(0)
+	]],
+	uniform float reflection_roughness = 1.f [[
+	  ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections on the material."),
+	  ::anno::display_name("Roughness"),
+	  ::anno::in_group("Appearance"),
+	  ::anno::hard_range(0.f, 1.f),
+	  ::anno::ui_order(1)
+	]],
+	uniform float reflection_variation = 0.f [[
+	  ::anno::description("Amount of variation applied to the roughness, higher numbers lead to non uniform reflections of the material."),
+	  ::anno::display_name("Reflection Variation"),
+	  ::anno::in_group("Appearance"),
+	  ::anno::hard_range(0.f, 1.f),
+	  ::anno::ui_order(2)
+	]],
+	uniform float dirt = 0.f [[
+	  ::anno::description("Adds a layer of dirt on the cardboard."),
+	  ::anno::display_name("Dirt Amount"),
+	  ::anno::in_group("Appearance"),
+	  ::anno::hard_range(0.f, 1.f),
+	  ::anno::ui_order(3)
+	]],
+	uniform float corrugation_strength = 0.f [[
+	  ::anno::description("Adjusts the strength of the corrugation effect."),
+	  ::anno::display_name("Corrugation Strength"),
+	  ::anno::in_group("Appearance", "Corrugation"),
+	  ::anno::hard_range(0.f, 1.f),
+	  ::anno::ui_order(4)
+	]],
+	uniform float corrugation_variation = 0.f [[
+	  ::anno::description("Breaks up the corrugation by attenuating it at random places."),
+	  ::anno::display_name("Corrugation Variation"),
+	  ::anno::in_group("Appearance", "Corrugation"),
+	  ::anno::hard_range(0.f, 1.f),
+	  ::anno::ui_order(5)
+	]],
+	uniform float2 texture_translate = float2(0.f) [[
+	  ::anno::description("Controls the position of the texture."),
+	  ::anno::display_name("Translate"),
+	  ::anno::in_group("Transform"),
+	  ::anno::ui_order(6)
+	]],
+	uniform float texture_rotate = 0.f [[
+	  ::anno::description("Rotates angle of the texture in degrees."),
+	  ::anno::display_name("Rotate"),
+	  ::anno::in_group("Transform"),
+	  ::anno::ui_order(7)
+	]],
+	uniform float2 texture_scale = float2(1.f) [[
+	  ::anno::description("Larger numbers increase the size."),
+	  ::anno::display_name("Scale"),
+	  ::anno::in_group("Transform"),
+	  ::nvidia::core_definitions::dimension(float2(0.3f,0.3f)),  
+	  ::anno::ui_order(8)
+	]],
+	uniform int uv_space_index = 0 [[
+	  ::anno::description("Use selected UV space for material."),
+	  ::anno::display_name("UV Space Index"),
+	  ::anno::in_group("Advanced"),
+	  ::anno::ui_order(9)
+	]],
+	uniform bool enable_round_corners = false [[
+	  ::anno::description("Enables the round corner effect. Comes at a slight performance cost as additional raytracing calls are required to evaluate the round corner effect."),
+	  ::anno::display_name("Round Corners"),
+	  ::anno::in_group("Round Corners"),
+	  ::anno::ui_order(10)
+	]],
+	uniform float radius = 1.5f [[
+	  ::anno::description("Radius of the rounded corners in millimeters (mm)."),
+	  ::anno::display_name("Radius mm"),
+	  ::anno::in_group("Round Corners"),
+	  ::anno::ui_order(11)
+	]],
+	uniform bool across_materials = false [[
+	  ::anno::description("Applies the round corner effect across different materials when enabled."),
+	  ::anno::display_name("Across Materials"),
+	  ::anno::in_group("Round Corners"),
+	  ::anno::ui_order(12)
+	]])
+[[
+		::anno::description(DESCRIPTION),
+		::anno::display_name("Cardboard Low Quality"),
+		::anno::copyright_notice(COPYRIGHT),
+		::anno::key_words(string[]("dielectric", "paper", "box", "brown", "yellow", "package", "delivery", "cardboard", "quality", "low", "cheap", "parcel")),
+		::anno::thumbnail("./.thumbs/Cardboard_Low_Quality.Cardboard_Low_Quality.png"),
+		::anno::author("Nvidia vMaterials"),
+		::anno::contributor("Maik Rohland"),
+		::anno::contributor("Ruediger Raab")
+]]
+ = 
+	let {
+		bool tmp0 = false;
+		material_surface tmp1(::df::custom_curve_layer(0.0399999991f, 1.f, 5.f, nvidia::core_definitions::blend_colors(color(1.f, 1.f, 1.f), ::base::file_texture(texture_2d("./textures/cardboard_norm2_ao.jpg", ::tex::gamma_srgb), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint, ::base::color_layer_blend, float3(endless_texture(texture_2d("./textures/cardboard_normal_var.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 3.f, float3(0.494118005f), 16.f, true))[0]).mono, ::df::microfacet_ggx_smith_bsdf((::math::lerp(reflection_variation * 0.199999988f, 0.189999998f, float3(endless_texture(texture_2d("./textures/lq_simple_cardboard_multi.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.533333004f, 0.823529005f, 0.36470601f), 8.f, false))[2]) + histogram_range(float3(endless_texture(texture_2d("./textures/lq_simple_cardboard_multi.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.533333004f, 0.823529005f, 0.36470601f), 8.f, false))[0], 0.310000002f, ::math::lerp(0.669999957f, 0.899999976f, reflection_roughness)) - ::math::lerp(::math::lerp(0.f, -1.f, dirt), 0.109999999f, float3(endless_texture(texture_2d("./textures/lq_simple_cardboard_multi.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.533333004f, 0.823529005f, 0.36470601f), 8.f, false))[1])) * (::math::lerp(reflection_variation * 0.199999988f, 0.189999998f, float3(endless_texture(texture_2d("./textures/lq_simple_cardboard_multi.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.533333004f, 0.823529005f, 0.36470601f), 8.f, false))[2]) + histogram_range(float3(endless_texture(texture_2d("./textures/lq_simple_cardboard_multi.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.533333004f, 0.823529005f, 0.36470601f), 8.f, false))[0], 0.310000002f, ::math::lerp(0.669999957f, 0.899999976f, reflection_roughness)) - ::math::lerp(::math::lerp(0.f, -1.f, dirt), 0.109999999f, float3(endless_texture(texture_2d("./textures/lq_simple_cardboard_multi.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.533333004f, 0.823529005f, 0.36470601f), 8.f, false))[1])), (::math::lerp(reflection_variation * 0.199999988f, 0.189999998f, float3(endless_texture(texture_2d("./textures/lq_simple_cardboard_multi.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.533333004f, 0.823529005f, 0.36470601f), 8.f, false))[2]) + histogram_range(float3(endless_texture(texture_2d("./textures/lq_simple_cardboard_multi.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.533333004f, 0.823529005f, 0.36470601f), 8.f, false))[0], 0.310000002f, ::math::lerp(0.669999957f, 0.899999976f, reflection_roughness)) - ::math::lerp(::math::lerp(0.f, -1.f, dirt), 0.109999999f, float3(endless_texture(texture_2d("./textures/lq_simple_cardboard_multi.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.533333004f, 0.823529005f, 0.36470601f), 8.f, false))[1])) * (::math::lerp(reflection_variation * 0.199999988f, 0.189999998f, float3(endless_texture(texture_2d("./textures/lq_simple_cardboard_multi.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.533333004f, 0.823529005f, 0.36470601f), 8.f, false))[2]) + histogram_range(float3(endless_texture(texture_2d("./textures/lq_simple_cardboard_multi.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.533333004f, 0.823529005f, 0.36470601f), 8.f, false))[0], 0.310000002f, ::math::lerp(0.669999957f, 0.899999976f, reflection_roughness)) - ::math::lerp(::math::lerp(0.f, -1.f, dirt), 0.109999999f, float3(endless_texture(texture_2d("./textures/lq_simple_cardboard_multi.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.533333004f, 0.823529005f, 0.36470601f), 8.f, false))[1])), color(1.f, 1.f, 1.f), ::state::texture_tangent_u(0), ::df::scatter_reflect, ""), ::df::weighted_layer(1.f, ::df::diffuse_reflection_bsdf(color(::math::lerp(1.f, float3(endless_texture(texture_2d("./textures/lq_simple_cardboard_multi.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.533333004f, 0.823529005f, 0.36470601f), 8.f, false))[1], ::math::lerp(0.f, 1.5f, dirt))) * ::base::file_texture(texture_2d("./textures/lq_simple_cardboard_diff.jpg", ::tex::gamma_srgb), color(0.f, 0.f, 0.f), color(diffuse_brightness), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint, 0.f, ""), bsdf(), add_detail_normal(normalmap_normal(texture_2d("./textures/lq_simple_cardboard_norm.jpg", ::tex::gamma_linear), 0.217000008f, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index)), normalmap_normal(texture_2d("./textures/cardboard_norm_2.jpg", ::tex::gamma_linear), ::math::clamp((float3(endless_texture(texture_2d("./textures/cardboard_normal_var.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 3.f, float3(0.494118005f), 16.f, true))[0] - 0.5f) * (corrugation_strength * 3.f * corrugation_variation) + corrugation_strength, 0.f, 10.f), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index)))), add_detail_normal(normalmap_normal(texture_2d("./textures/lq_simple_cardboard_norm.jpg", ::tex::gamma_linear), 0.217000008f, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index)), normalmap_normal(texture_2d("./textures/cardboard_norm_2.jpg", ::tex::gamma_linear), ::math::clamp((float3(endless_texture(texture_2d("./textures/cardboard_normal_var.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 3.f, float3(0.494118005f), 16.f, true))[0] - 0.5f) * (corrugation_strength * 3.f * corrugation_variation) + corrugation_strength, 0.f, 10.f), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index)))), material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		material_surface tmp2 = material_surface(scattering: bsdf(), emission: material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		color tmp3 = color(1.f, 1.f, 1.f);
+		material_geometry tmp5(float3(0.f), 1.f, enable_round_corners ? ::state::rounded_corner_normal(radius * 0.00499999989f, across_materials, 1.f) : ::state::normal());
+		
+	} in
+		material(
+			thin_walled: tmp0,
+			surface: tmp1,
+			backface: tmp2,
+			ior: tmp3,
+			geometry: tmp5);
+			
+export material Cardboard_Low_Quality_Dirt(*) 
+[[
+	::anno::display_name("Cardboard Low Quality Dirt"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::key_words(string[]("dielectric", "paper", "box", "brown", "package", "delivery", "cardboard", "quality", "low", "cheap", "used", "parcel", "aged", "dirty")),
+	::anno::thumbnail("./.thumbs/Cardboard_Low_Quality.Cardboard_Low_Quality_Dirt.png"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab")
+]]
+= Cardboard_Low_Quality
+(
+   diffuse_brightness: 0.5f,
+   reflection_roughness: 0.5f,
+   reflection_variation: 1.f,
+   dirt: 0.6f,
+   corrugation_strength: 0.5f,
+   corrugation_variation: 1.f,
+   texture_translate: float2(0.f),
+   texture_rotate: 0.f,
+   texture_scale: float2(1.f),
+   uv_space_index: 0,
+   enable_round_corners: false,
+   radius: 1.5f,
+   across_materials: true
+);
+
+export material Cardboard_Low_Quality_Corrugation(*) 
+[[
+	::anno::display_name("Cardboard Low Quality Corrugation"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::key_words(string[]("dielectric", "paper", "box", "brown", "corrugation", "package", "delivery", "cardboard", "quality", "low", "cheap", "used", "parcel", "aged")),
+	::anno::thumbnail("./.thumbs/Cardboard_Low_Quality.Cardboard_Low_Quality_Corrugation.png"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab")
+]]
+= Cardboard_Low_Quality
+(
+   diffuse_brightness: 1.f,
+   reflection_roughness: 0.f,
+   reflection_variation: 1.f,
+   dirt: 0.f,
+   corrugation_strength: 1.f,
+   corrugation_variation: 0.f,
+   texture_translate: float2(0.f),
+   texture_rotate: 0.f,
+   texture_scale: float2(1.f),
+   uv_space_index: 0,
+   enable_round_corners: false,
+   radius: 1.5f,
+   across_materials: true
+);
+
+export material Cardboard_Low_Quality_Used(*) 
+[[
+	::anno::display_name("Cardboard Low Quality Used"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::key_words(string[]("dielectric", "paper", "box", "brown", "corrugation", "package", "delivery", "cardboard", "quality", "low", "cheap", "used", "parcel", "aged")),
+	::anno::thumbnail("./.thumbs/Cardboard_Low_Quality.Cardboard_Low_Quality_Used.png"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab")
+]]
+= Cardboard_Low_Quality
+(
+   diffuse_brightness: 0.8f,
+   reflection_roughness: 0.3f,
+   reflection_variation: 0.f,
+   dirt: 0.4f,
+   corrugation_strength: 1.f,
+   corrugation_variation: 0.6f,
+   texture_translate: float2(0.f),
+   texture_rotate: 0.f,
+   texture_scale: float2(1.f),
+   uv_space_index: 0,
+   enable_round_corners: false,
+   radius: 1.5f,
+   across_materials: true
+);
+
+export material Cardboard_Low_Quality_Burnt(*) 
+[[
+	::anno::display_name("Cardboard Low Quality Burnt"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::key_words(string[]("dielectric", "paper", "box", "black", "brown", "corrugation", "package", "delivery", "cardboard", "quality", "low", "cheap", "used", "parcel", "aged", "burnt")),
+	::anno::thumbnail("./.thumbs/Cardboard_Low_Quality.Cardboard_Low_Quality_Burnt.png"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab")
+]]
+= Cardboard_Low_Quality
+(
+   diffuse_brightness: 0.15f,
+   reflection_roughness: 0.f,
+   reflection_variation: 0.f,
+   dirt: 0.4f,
+   corrugation_strength: 1.f,
+   corrugation_variation: 1.f,
+   texture_translate: float2(0.f),
+   texture_rotate: 0.f,
+   texture_scale: float2(1.f),
+   uv_space_index: 0,
+   enable_round_corners: false,
+   radius: 1.5f,
+   across_materials: true
+);

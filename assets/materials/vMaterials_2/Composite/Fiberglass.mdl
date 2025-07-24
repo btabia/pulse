@@ -1,0 +1,394 @@
+/******************************************************************************
+ *	        Copyright 2024 NVIDIA Corporation. All rights reserved.           *
+ ******************************************************************************
+ 
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our 
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL 
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA’s Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any 
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR 
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, 
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF 
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+
+mdl 1.5;
+
+import ::anno::*;
+import ::base::*;
+import ::df::*;
+import ::math::*;
+import ::state::*;
+import ::tex::*;
+import ::nvidia::core_definitions::blend_colors;
+import ::nvidia::core_definitions::dimension;
+
+const string COPYRIGHT = 
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+annotation preview_scale( float f);
+
+::base::texture_coordinate_info transform_coordinate_2(
+	float4x4 transform										 
+		[[ ::anno::description("A transformation to be applied to the source coordinates. rotation_translation_scale() is a suggested means to compute the transformation matrix.") ]],
+	::base::texture_coordinate_info coordinate = ::base::texture_coordinate_info()
+		[[ ::anno::description("Coordinate, typically sourced from coordinate_source or coordinate_projection.") ]]
+) [[ 
+	::anno::description("Transform a texture coordinate by a matrix.") ,
+	::anno::noinline()
+  ]]
+{
+	// Version 2
+	float4 r_position = transform * float4(coordinate.position.x,coordinate.position.y,coordinate.position.z,1);
+	//Try aproximating it for the case that the rotation is only aroud z and assuming the texture layout is nice and z is ~constant.
+	//just pretend there is no other rotation happening
+	//get rid of scaling and translation. Then extract fields where sin and cos would be in a simple 2d transform around z.
+	float4 u = transform[0];
+	float3 ru = ::math::normalize(float3(u.x,u.y,u.z));
+	float cos =  ru.x; 
+	float sin =  -ru.y;
+	//TODO: at least also handle sign of z?
+	//TODO: handle tangent becoming 0 
+	
+	
+	return ::base::texture_coordinate_info(
+		float3(r_position.x,r_position.y,r_position.z),
+		::math::normalize(cos * coordinate.tangent_u - sin * coordinate.tangent_v),
+		::math::normalize(cos * coordinate.tangent_v + sin * coordinate.tangent_u));
+}
+
+
+::base::texture_coordinate_info vmat_transform(
+								float2 translation = float2(0.0, 0.0),
+								float rotation	 = 0.0,				// rotation in degrees
+								float2 scaling	 = float2(1.0, 1.0),
+								uniform ::base::texture_coordinate_system system = ::base::texture_coordinate_uvw,
+								uniform int uv_space	   = 0
+)
+{
+	float rotation_rad = (rotation * 3.1415926535897932384626433832f) / 180.f;
+	float4x4 scale =
+	float4x4(1.0 /scaling.x, 0.			 ,  0. ,	 0.,
+			 0.			, 1.0 /scaling.y ,  0. ,	 0.,
+			 0.			, 0.			 ,  1.0,	 0.,
+			 translation.x , translation.y  ,  0.0,	 1.);
+
+	float s = ::math::sin(rotation_rad);
+	float c = ::math::cos(rotation_rad);
+	float4x4 rotate =
+	float4x4(  c  ,  -s   , 0.0 , 0.0,
+			   s  ,   c   , 0.0 , 0.0,
+			   0.0,   0.0 , 1.0 , 0.0,
+			   0. ,   0.0 , 0.0 , 1.);
+	
+	return transform_coordinate_2(scale*rotate, ::base::coordinate_source(system, uv_space));
+}
+
+
+float remap_xy_to_0_1(float input, float x, float y)
+{
+	return (input - x)/(y - x);
+}
+
+float histogram_range(float input, float range = 1.0f, float position = 0.5f)
+{	
+	float low = ::math::clamp(1.0 - ::math::min(((1.0 - position) + range * 0.5), (1.0 - position) * 2), 0.0, 1.0);
+	float high = ::math::clamp(::math::min((position + range * 0.5 ), position * 2.0), 0.0, 1.0);
+	return ::math::lerp(low, high, input);
+}
+
+float histogram_scan(float input, float width, float position)
+{	
+	float low = ::math::clamp(1.0f - position * 2.0, 0.0f ,1.0f);
+	float high = ::math::clamp(position > 0.5f ? 1.0 : 2.0f - 2 * position, 0.0f, 1.0f);
+	//float center = (low + high)/2.0f);
+	float offset = ((high - low) / 2.0) * width;
+	low += offset;
+	high -= offset;
+	return ::math::clamp(
+				remap_xy_to_0_1(input,
+					low,
+					high),
+				0.0,
+				1.0);
+}
+
+// Returns the normal n in tangent space, given n is in internal space.
+float3 transform_internal_to_tangent(float3 n)
+[[ 
+	::anno::hidden() 
+]]
+{
+	return
+		n.x* float3(::state::texture_tangent_u(0).x,::state::texture_tangent_v(0).x,::state::normal().x)+
+		n.y* float3(::state::texture_tangent_u(0).y,::state::texture_tangent_v(0).y,::state::normal().y)+
+		n.z* float3(::state::texture_tangent_u(0).z,::state::texture_tangent_v(0).z,::state::normal().z);
+}
+
+// Returns the normal n in internal space, given n is in tangent space.
+float3 transform_tangent_to_internal(float3 n)
+[[ 
+	::anno::hidden() 
+]]
+{
+	return  ::state::texture_tangent_u(0) * n.x +
+			::state::texture_tangent_v(0) * n.y +
+			::state::normal() * n.z ;
+}
+
+
+
+// Returns a normal by adding a detail normal to a global normal.
+// If detail blending of two normal maps gives visual artifacts, check if texture_2d are loaded
+// correctly with ::tex::gamma_linear
+float3 add_detail_normal(float3 nd = ::state::normal(), float3 n = ::state::normal())
+{
+	// http://blog.selfshadow.com/publications/blending-in-detail/
+	float3 n_t = transform_internal_to_tangent(n);
+	float3 nd_t = transform_internal_to_tangent(nd);
+
+	n_t=n_t + float3(0.,0.,1.);
+	nd_t = nd_t *  float3(-1.,-1.,1.);
+	n = n_t*::math::dot(n_t, nd_t)/n_t.z - nd_t;
+	return ::math::normalize(transform_tangent_to_internal(n));
+}
+
+export material Fiberglass(
+	float fibers_shininess = 0.5f [[
+		::anno::description("Makes the fiber glass material duller or shinier. Default value is 0.5."),
+		::anno::display_name("Fibers Shininess"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(0)
+	]],
+	color fiberglass_tint = color(.8f) [[
+		::anno::description("Tints the glass fiber material."),
+		::anno::display_name("Fiberglass Tint"),
+		::anno::in_group("Appearance", "Diffuse"),
+		::anno::ui_order(1)
+	]],
+	uniform float weaving_bump_strength = 1.0f [[
+		::anno::description("Determines the degree of bumpiness."),
+		::anno::display_name("Weaving Bump Strength"),
+		::anno::in_group("Appearance", "Bump"),
+		::anno::soft_range(0.f, 1.f),
+		::anno::hard_range(0.f, 3.f),
+		::anno::ui_order(2)
+	]],
+	uniform float fibers_bump_strength = 1.f [[
+		::anno::description("Determines the degree of bumpiness of the fibers."),
+		::anno::display_name("Fibers Bump Strength"),
+		::anno::in_group("Appearance", "Bump"),
+		::anno::hard_range(0.f, 3.f),
+		::anno::soft_range(0.f, 1.f),
+		::anno::ui_order(3)
+	]],
+	float diffuse_brightness = 0.61f [[
+		::anno::description("The diffuse brightness of the fibers."),
+		::anno::display_name("Diffuse Brightness"),
+		::anno::in_group("Appearance", "Advanced"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(5)
+	]],
+	float specular_weight = 1.f [[
+		::anno::description("The amount of glossiness variation for the vertical fiber glossiness."),
+		::anno::display_name("Specular Weight"),
+		::anno::in_group("Appearance", "Advanced"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(4)
+	]],
+	float diffuse_transmission_weight = 0.21f [[
+		::anno::description("Weight of the diffuse transmission."),
+		::anno::display_name("Diffuse Transmission Weight"),
+		::anno::in_group("Appearance", "Advanced"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(6)
+	]],
+	float2 texture_translate = float2(0.f) [[
+		::anno::description("Controls the position of the texture."),
+		::anno::display_name("Texture Translate"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(10)
+	]],
+	float texture_rotate = 0.f [[
+		::anno::description("Rotates angle of the texture in degrees."),
+		::anno::display_name("Texture Rotate"),
+		::anno::in_group("Transform"),
+		::anno::soft_range(0.f, 360.f),
+		::anno::ui_order(11)
+	]],
+	float2 texture_scale = float2(1.0f) [[
+		::anno::description("Larger numbers increase the size."),
+		::anno::display_name("Texture Scale"),
+		::anno::in_group("Transform"),
+		::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+		::preview_scale(2.5f),
+		::anno::ui_order(12)
+	]],
+	uniform int uv_space_index = 0 [[
+		::anno::description("The UV space to use for the texture mapping."),
+		::anno::display_name("UV Space Index"),
+		::anno::in_group("Advanced"),
+		::anno::ui_order(13)
+	]])
+[[
+	::anno::description("A fiberglass material."),
+	::anno::display_name("Fiberglass"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Fiberglass.Fiberglass.png"),
+	::anno::key_words(string[]("fiber", "fiberglass", "artificial", "design", "fabric", "mesh", "woven", "synthetic", "white", "light", "neutral")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]]
+ = 
+	let {
+		
+		float2 texture_rescale = texture_scale * 0.1f;
+		
+		bool tmp0 = false;
+		material_surface tmp1(::df::weighted_layer(diffuse_transmission_weight, ::df::diffuse_transmission_bsdf(nvidia::core_definitions::blend_colors(color(histogram_range(float3(::base::file_texture(texture_2d("./textures/fiberglass_multi_R_rough_G_ao_B_mask.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 1.f, 0.810000002f)), fiberglass_tint, ::base::color_layer_multiply, 1.f).tint), ::df::custom_curve_layer(specular_weight, 1.f, 5.f, histogram_scan(float3(::base::file_texture(texture_2d("./textures/fiberglass_multi_R_rough_G_ao_B_mask.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[1], 0.f, 0.469999999f), ::df::microfacet_ggx_smith_bsdf(::math::max(::math::smoothstep(0.789999962f, 0.790999949f, float3(::base::file_texture(texture_2d("./textures/fiberglass_multi_R_rough_G_ao_B_mask.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2]) * histogram_range(float3(::base::file_texture(texture_2d("./textures/fiberglass_multi_R_rough_G_ao_B_mask.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 1.f, ::math::lerp(0.389999986f, 0.0799999982f, fibers_shininess)), histogram_range(float3(::base::file_texture(texture_2d("./textures/fiberglass_multi_R_rough_G_ao_B_mask.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 1.f, ::math::lerp(0.800000012f, 0.5f, fibers_shininess)) * ::math::min(1.f - ::math::smoothstep(0.50999999f, 0.539999962f, float3(::base::file_texture(texture_2d("./textures/fiberglass_multi_R_rough_G_ao_B_mask.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2]), ::math::smoothstep(0.340000004f, 0.389999986f, float3(::base::file_texture(texture_2d("./textures/fiberglass_multi_R_rough_G_ao_B_mask.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2]))), ::math::max(::math::smoothstep(0.789999962f, 0.790999949f, float3(::base::file_texture(texture_2d("./textures/fiberglass_multi_R_rough_G_ao_B_mask.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2]) * histogram_range(float3(::base::file_texture(texture_2d("./textures/fiberglass_multi_R_rough_G_ao_B_mask.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 1.f, ::math::lerp(0.800000012f, 0.5f, fibers_shininess)), histogram_range(float3(::base::file_texture(texture_2d("./textures/fiberglass_multi_R_rough_G_ao_B_mask.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 1.f, ::math::lerp(0.389999986f, 0.0799999982f, fibers_shininess)) * ::math::min(1.f - ::math::smoothstep(0.50999999f, 0.539999962f, float3(::base::file_texture(texture_2d("./textures/fiberglass_multi_R_rough_G_ao_B_mask.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2]), ::math::smoothstep(0.340000004f, 0.389999986f, float3(::base::file_texture(texture_2d("./textures/fiberglass_multi_R_rough_G_ao_B_mask.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2]))), color(1.f, 1.f, 1.f), ::state::texture_tangent_u(0), ::df::scatter_reflect), ::df::diffuse_reflection_bsdf(nvidia::core_definitions::blend_colors(color(histogram_range(float3(::base::file_texture(texture_2d("./textures/fiberglass_multi_R_rough_G_ao_B_mask.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 1.f, diffuse_brightness)), fiberglass_tint, ::base::color_layer_multiply, 1.f).tint, 0.f), ::state::normal()), ::state::normal()), material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		material_surface tmp2 = material_surface(scattering: bsdf(), emission: material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		color tmp3 = color(1.f, 1.f, 1.f);
+		material_volume tmp4 = material_volume(scattering: vdf(), absorption_coefficient: color(0.f, 0.f, 0.f), scattering_coefficient: color(0.f, 0.f, 0.f));
+		material_geometry tmp5(float3(0.f), ::math::smoothstep(0.0299999993f, 0.0309999995f, float3(::base::file_texture(texture_2d("./textures/fiberglass_multi_R_rough_G_ao_B_mask.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2]), add_detail_normal(::base::file_bump_texture(texture_2d("./textures/fiberglass_bump.jpg", ::tex::gamma_linear), fibers_bump_strength, ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, ::state::normal(), false), ::base::tangent_space_normal_texture(texture_2d("./textures/fiberglass_norm.jpg", ::tex::gamma_linear), weaving_bump_strength, false, false, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 1.f, 0.f)));
+		hair_bsdf tmp6 = hair_bsdf();
+	} in
+		material(
+			thin_walled: tmp0,
+			surface: tmp1,
+			backface: tmp2,
+			ior: tmp3,
+			volume: tmp4,
+			geometry: tmp5,
+			hair: tmp6);
+
+
+export material Fiberglass_Flat_Weave(*)
+[[
+	::anno::description("A fiberglass material."),
+	::anno::display_name("Fiberglass Flat Weave"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Fiberglass.Fiberglass_Flat_Weave.png"),
+	::anno::key_words(string[]("fiber", "fiberglass", "artificial", "design", "fabric", "mesh", "woven", "synthetic", "white", "light", "neutral")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Fiberglass(
+	fibers_shininess:			0.5f,	
+	fiberglass_tint:			color(.85f),
+	weaving_bump_strength:		0.3f,
+	fibers_bump_strength:		1.0f,
+	specular_weight:			1.0f,
+	diffuse_brightness:			0.7f,
+	diffuse_transmission_weight: 0.21f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	uv_space_index:				0
+);
+
+export material Fiberglass_Shiny(*)
+[[
+	::anno::description("A fiberglass material."),
+	::anno::display_name("Fiberglass Shiny"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Fiberglass.Fiberglass_Shiny.png"),
+	::anno::key_words(string[]("fiber", "fiberglass", "artificial", "design", "fabric", "mesh", "woven", "synthetic", "white", "light", "neutral")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Fiberglass(
+	fibers_shininess:			1.0f,	
+	fiberglass_tint:			color(.8f),
+	weaving_bump_strength:		0.75f,
+	fibers_bump_strength:		1.0f,
+	specular_weight:			1.0f,
+	diffuse_brightness:			0.75f,
+	diffuse_transmission_weight: 0.21f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	uv_space_index:				0
+);
+
+export material Fiberglass_Yellowish(*)
+[[
+	::anno::description("A fiberglass material."),
+	::anno::display_name("Fiberglass Yellowish"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Fiberglass.Fiberglass_Yellowish.png"),
+	::anno::key_words(string[]("fiber", "fiberglass", "artificial", "design", "fabric", "mesh", "woven", "synthetic", "yellow", "light", "neutral")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Fiberglass(
+	fibers_shininess:			0.0f,	
+	fiberglass_tint:			color(0.875138f, 0.812241f, 0.348865f),
+	weaving_bump_strength:		0.75f,
+	fibers_bump_strength:		1.0f,
+	specular_weight:			1.0f,
+	diffuse_brightness:			0.75f,
+	diffuse_transmission_weight: 0.21f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	uv_space_index:				0
+);
+
+
+export material Fiberglass_Blueish(*)
+[[
+	::anno::description("A fiberglass material."),
+	::anno::display_name("Fiberglass Blueish"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Fiberglass.Fiberglass_Blueish.png"),
+	::anno::key_words(string[]("fiber", "fiberglass", "artificial", "design", "fabric", "mesh", "woven", "synthetic", "white", "blue", "light", "neutral")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Fiberglass(
+	fibers_shininess:			0.0f,	
+	fiberglass_tint:			color(0.744530f, 0.915750f, 0.957370f),
+	weaving_bump_strength:		0.75f,
+	fibers_bump_strength:		.75f,
+	specular_weight:			1.0f,
+	diffuse_brightness:			0.75f,
+	diffuse_transmission_weight: 0.21f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	uv_space_index:				0
+);

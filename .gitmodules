@@ -1,0 +1,3 @@
+[submodule "isaac_lab"]
+	path = isaac_lab
+	url = git@github.com:btabia/isaac_lab.git

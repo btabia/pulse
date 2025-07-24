@@ -1,0 +1,740 @@
+/******************************************************************************
+ *	 Copyright 2024 NVIDIA Corporation. All rights reserved.	 *
+ ******************************************************************************
+ 
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our 
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL 
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA's Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any 
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR 
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, 
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF 
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+
+mdl 1.6;
+
+import ::anno::*;
+import ::base::*;
+import ::df::*;
+import ::math::*;
+import ::state::*;
+import ::tex::*;
+import ::nvidia::core_definitions::blend_colors;
+import ::nvidia::core_definitions::dimension;
+
+
+const string COPYRIGHT = 
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+
+const string DESCRIPTION = "A polished brass material with tweakable surface imperfections";
+
+float3 srgb2rgb(float3 val)
+{
+	return ::math::pow(::math::max(val, float3(0.0f)), 2.2);
+}
+
+
+float uint2float(int x)
+{
+	return float(x & 0x7FFFFFFF) + (x < 0 ? 2147483648.0 : 0.0);
+}
+
+int lowbias32(int x)
+{
+	x ^= x >>> 16;
+	x *= 0x7feb352d;
+	x ^= x >>> 15;
+	x *= 0x846ca68b;
+	x ^= x >>> 16;
+	return x;
+}
+
+float2 rnd22(int2 p) {
+	float2 ret_val = float2(
+		uint2float(lowbias32(p[0] + lowbias32(p[1]))) / 4294967296.f,
+		uint2float(lowbias32(p[0] + 32000 + lowbias32(p[1]))) / 4294967296.f
+	);
+	return ret_val;
+}	
+
+::base::texture_coordinate_info vmat_transform(
+								uniform float2 translation = float2(0.0, 0.0),
+								uniform float rotation	 = 0.0,
+								uniform float2 scaling	 = float2(1.0, 1.0),
+								uniform ::base::texture_coordinate_system system = ::base::texture_coordinate_uvw,
+								uniform int uv_space	   = 0
+)
+{
+	float4x4 scale =
+	float4x4(1.0 /scaling.x, 0.			 ,  0. ,	 0.,
+			 0.			, 1.0 /scaling.y ,  0. ,	 0.,
+			 0.			, 0.			 ,  1.0,	 0.,
+			 translation.x , translation.y  ,  0.0,	 1.);
+
+	float s = ::math::sin(rotation);
+	float c = ::math::cos(rotation);
+	float4x4 rotate =
+	float4x4(  c  ,  -s   , 0.0 , 0.0,
+			   s  ,   c   , 0.0 , 0.0,
+			   0.0,   0.0 , 1.0 , 0.0,
+			   0. ,   0.0 , 0.0 , 1.);
+	
+	return ::base::transform_coordinate(scale*rotate, ::base::coordinate_source(system, uv_space));
+}
+
+float2x2 invert_2x2(float2x2 M)
+{
+	float det = M[0][0]*M[1][1] - M[0][1]*M[1][0];
+	//https://www.chilimath.com/lessons/advanced-algebra/inverse-of-a-2x2-matrix/
+	return (1.0 / det) * float2x2(M[1][1], -M[0][1], -M[1][0], M[0][0]);
+}
+
+float3 nonrepeat_lookup(
+	uniform texture_2d texture = texture_2d(),
+	::base::texture_coordinate_info uvw = ::base::coordinate_source(),
+	float texture_scale = 1.0,
+	float3 average_color = float3(0.5),
+	float patch_size = 8.0
+)
+{
+	
+	float2 uv_in = float2(uvw.position[0], uvw.position[1]) * texture_scale;
+	float Z =  patch_size;	 // patch scale inside example texture
+	float CON = 1.0f;
+	
+	float3 O = float3(0.f);
+	float2x2 M0 = float2x2(1.f,0.f, 0.5f, ::math::sqrt(3.f)/2.f);
+	float2x2 M = invert_2x2(M0); // transform matrix <-> tilted space
+	
+	float2 U = uv_in;
+	float2 V = M * uv_in; //pre-tilted hexa coordinates
+	int2 I = int2(::math::floor(V)); // hexa-tile id
+	
+	// The mean color needs to be determined in Photoshop then to make the
+	// average color work out, take the float value and calculate the apropriate
+	// mean value as (value^(1/2.2))
+
+	float3 m = average_color;
+	
+	float3 F = float3(::math::frac(V)[0], ::math::frac(V)[1], 0.f), W;
+	F[2] = 1.0 - F[0] - F[1]; // local hexa coordinates
+	
+	if( F[2] > 0.f )
+
+		O = (W[0] = F[2]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I))) - m*float(CON))
+		  + (W[1] = F[1]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(0,1)))) - m*float(CON))
+		  + (W[2] = F[0]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(1,0)))) - m*float(CON));
+	else
+		O = (W[0] =	  -F[2]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(1))))   - m*float(CON))
+		  + (W[1] = 1.f - F[1]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(1, 0)))) - m*float(CON))
+		  + (W[2] = 1.f - F[0]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(0, 1)))) - m*float(CON));
+	O = m + O/::math::length(W);
+	O = ::math::clamp( (O), 0.0, 1.0);
+	
+	return float3(O);
+}
+
+
+float histogram_range(float input, float range, float position)
+{	
+	float low = ::math::clamp(1.0 - ::math::min(((1.0 - position) + range * 0.5), (1.0 - position) * 2), 0.0, 1.0);
+	float high = ::math::clamp(::math::min((position + range * 0.5 ), position * 2.0), 0.0, 1.0);
+	return ::math::lerp(low, high, input);
+}
+
+
+
+color endless_texture(
+	uniform texture_2d texture = texture_2d(),
+	::base::texture_coordinate_info uvw = ::base::coordinate_source(),
+	float texture_scale = 10.0,
+	float3 average_color = float3(0.5, 0.5, 1.0),
+	float patch_size = 8.0,
+	bool gamma_correct_lookup = true
+)
+{
+	return gamma_correct_lookup ? color(srgb2rgb(
+			nonrepeat_lookup (
+				texture: texture,
+				uvw: uvw,
+				texture_scale: texture_scale,
+				average_color: average_color,
+				patch_size: patch_size
+			))
+		) : color(nonrepeat_lookup (
+			texture: texture,
+			uvw: uvw,
+			texture_scale: texture_scale,
+			average_color: average_color,
+			patch_size: patch_size
+		));
+}
+
+float3 endless_normal(
+	uniform texture_2d texture = texture_2d(),
+	float factor = 1.0,
+	bool flip_tangent_u = false,
+	bool flip_tangent_v = false,
+	::base::texture_coordinate_info uvw = ::base::coordinate_source(),
+	float texture_scale = 1.0,
+	float3 average_color = float3(0.5, 0.5, 1.0),
+	float patch_size = 8.0
+)
+{
+	float3 transformed_tangent_u = flip_tangent_u ? uvw.tangent_u : - uvw.tangent_u;
+	float3 transformed_tangent_v = flip_tangent_v ? uvw.tangent_v : - uvw.tangent_v;
+	
+	if (flip_tangent_u)
+		transformed_tangent_u=-transformed_tangent_u;
+	if (flip_tangent_v)
+		transformed_tangent_v=-transformed_tangent_v;
+
+	// normalized Lookup
+	float3 tangent_space_normal =
+		 (nonrepeat_lookup (
+			texture: texture,
+			uvw: uvw,
+			texture_scale: texture_scale,
+			average_color: average_color,
+			patch_size: patch_size
+		) - 0.5) * (2.0 * factor);
+		
+	 return ::math::normalize(uvw.tangent_u * tangent_space_normal.x +
+		  uvw.tangent_v * tangent_space_normal.y +
+		  ::state::normal()*1.0); 
+}
+
+
+
+// Returns the normal n in tangent space, given n is in internal space.
+float3 transform_internal_to_tangent(float3 n)
+[[ 
+	anno::hidden() 
+]]
+{
+	return
+		n.x* float3(state::texture_tangent_u(0).x,state::texture_tangent_v(0).x,state::normal().x)+
+		n.y* float3(state::texture_tangent_u(0).y,state::texture_tangent_v(0).y,state::normal().y)+
+		n.z* float3(state::texture_tangent_u(0).z,state::texture_tangent_v(0).z,state::normal().z);
+}
+
+// Returns the normal n in internal space, given n is in tangent space.
+float3 transform_tangent_to_internal(float3 n)
+[[ 
+	anno::hidden() 
+]]
+{
+	return  state::texture_tangent_u(0) * n.x +
+			state::texture_tangent_v(0) * n.y +
+			state::normal() * n.z ;
+}
+
+float3 add_detail_normal(float3 nd = state::normal(), float3 n = state::normal())
+{
+	// http://blog.selfshadow.com/publications/blending-in-detail/
+	float3 n_t = transform_internal_to_tangent(n);
+	float3 nd_t = transform_internal_to_tangent(nd);
+
+	n_t=n_t + float3(0.,0.,1.);
+	nd_t = nd_t *  float3(-1.,-1.,1.);
+	n = n_t*math::dot(n_t, nd_t)/n_t.z - nd_t;
+	return ::math::normalize(transform_tangent_to_internal(n));
+}
+
+
+
+color gradient_lookup_smooth(uniform texture_2d gradient_texture, float position, float gradient_select = 0)
+{
+	// Pixel centers lie in the middle. To properly access the pixel centers of the gradients, apply an offset
+	float2 texel_coord = float2(position, gradient_select + (0.5f / ::tex::height(gradient_texture)));
+	return color(::tex::lookup_float3(gradient_texture, texel_coord));
+}
+
+export material Brass_Polished(
+	float polish_film_roughness = 0.06f [[
+		::anno::description("Low values make the polish layer appear shinier while higher values give it more cloudy."),
+		::anno::display_name("Polish Film Roughness"),
+		::anno::in_group("Appearance", "Polish"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(0)
+	]],
+	float polish_film_strength = 1.f [[
+		::anno::description("The amount of of polish film visible on the metal surface."),
+		::anno::display_name("Polish Film Weight"),
+		::anno::in_group("Appearance", "Polish"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(1)
+	]],
+	float brass_type_select = 0.f [[
+		::anno::description("Bends between the Brass types. 0 is yellow brass, 0.33 gold brass and 0.66 red brass. Going from 0.66 to 1.0 wraps back to yellow brass."),
+		::anno::display_name("Brass Type Blend"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(2)
+	]],
+	float roughness = 0.04f [[
+		::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+		::anno::display_name("Metal Roughness"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(3)
+	]],
+	float roughness_variation = 0.62f [[
+		::anno::description("Adds variation to the shininess of the metal."),
+		::anno::display_name("Roughness Variation"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(4)
+	]],
+	float surface_dirt = 0.f [[
+		::anno::description("Adds a thin layer of dirt on the surface which darkens the appearance."),
+		::anno::display_name("Surface Dirt"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(5)
+	]],
+	float bump_strength = 0.05f [[
+		::anno::description("Specifies the strength of the bump."),
+		::anno::display_name("Bump Strength"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(6)
+	]],
+	uniform float2 texture_translate = float2(0.f) [[
+		::anno::description("Controls the position of the texture."),
+		::anno::display_name("Texture Translate"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(7)
+	]],
+	uniform float texture_rotate = 0.f [[
+		::anno::description("Rotates angle of the texture in degrees."),
+		::anno::display_name("Texture Rotate"),
+		::anno::in_group("Transform"),
+		::anno::soft_range(0.f, 360.f),
+		::anno::ui_order(8)
+	]],
+	uniform float2 texture_scale = float2(1.f) [[
+		::anno::description("Larger numbers increase the size."),
+		::anno::display_name("Texture Scale"),
+		::anno::in_group("Transform"),
+		::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+		::anno::ui_order(9)
+	]],
+	uniform bool roundcorners_enable = false [[
+		::anno::description("Enables the round corner effect. Comes at a slight performance cost as additional raytracing calls are required to evaluate the round corner effect."),
+		::anno::display_name("Enable Round Corners"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(10)
+	]],
+	uniform float roundcorners_radius_mm = 1.5f [[
+		::anno::description("Radius of the rounded corners in millimeters."),
+		::anno::display_name("Round Corner Radius (mm)"),
+		::anno::in_group("Round Corners"),
+		::anno::soft_range(0.f, 10.f),
+		::anno::ui_order(11)
+	]],
+	uniform bool roundcorners_across_materials = true [[
+		::anno::description("Applies the round corner effect across different materials when enabled."),
+		::anno::display_name("Across Materials"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(12)
+	]],
+	uniform int uv_space_index = 0 [[
+		::anno::description("Uses selected UV space for material."),
+		::anno::display_name("UV Space Index"),
+		::anno::in_group("Advanced"),
+		::anno::hard_range(0, 10),
+		::anno::ui_order(13)
+	]])
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Polished Yellow - Shiny Polish"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Polished.Brass_Polished.png"),
+	::anno::key_words(string[]("metal", "brass", "reflective", "polished", "new", "smudged", "design", "yellow", "warm"))
+]]
+ = 
+	let {
+		bool tmp0 = false;
+		material_surface tmp1(df::weighted_layer(math::max(float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).x * surface_dirt, math::min(surface_dirt, float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).y)), df::diffuse_reflection_bsdf(nvidia::core_definitions::blend_colors(color(0.00560500007f, 0.00191999995f, 0.f), color(0.0437350012f, 0.0346640013f, 0.0266149994f), base::color_layer_blend, float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).x).tint, 0.f), df::custom_curve_layer(0.219999999f, 1.f, 1.09000003f, math::pow(float3(endless_texture(texture_2d("./textures/polish_wipe.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.284000009f), 6.12999964f, false)).x, 0.25f) * (polish_film_strength * 0.25f + 0.0500000007f), df::microfacet_ggx_smith_bsdf(histogram_range(float3(endless_texture(texture_2d("./textures/polish_wipe.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.284000009f), 6.12999964f, false)).x, 0.919999957f, polish_film_roughness * 0.349999994f), histogram_range(float3(endless_texture(texture_2d("./textures/polish_wipe.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.284000009f), 6.12999964f, false)).x, 0.919999957f, polish_film_roughness * 0.349999994f), color(0.638283014f, 0.638283014f, 0.638283014f), color(0.f, 0.f, 0.f), state::texture_tangent_u(0), df::scatter_reflect), df::custom_curve_layer(0.f, 1.f, 5.35999966f, 1.f, df::weighted_layer(0.119999997f, df::microfacet_ggx_smith_bsdf(histogram_range(float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).z, 0.170000002f, math::lerp(0.399999976f, 0.799999952f, roughness)) * histogram_range(float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).z, 0.170000002f, math::lerp(0.399999976f, 0.799999952f, roughness)), histogram_range(float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).z, 0.170000002f, math::lerp(0.399999976f, 0.799999952f, roughness)) * histogram_range(float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).z, 0.170000002f, math::lerp(0.399999976f, 0.799999952f, roughness)), color(1.f, 1.f, 1.f), color(1.f, 1.f, 1.f), state::texture_tangent_u(0), df::scatter_reflect), df::weighted_layer(1.f, df::microfacet_ggx_smith_bsdf(histogram_range(float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).z, math::lerp(0.0700000003f, 0.870000005f, roughness_variation), math::lerp(0.0399999991f, 0.50999999f, roughness)) * histogram_range(float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).z, math::lerp(0.0700000003f, 0.870000005f, roughness_variation), math::lerp(0.0399999991f, 0.50999999f, roughness)), histogram_range(float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).z, math::lerp(0.0700000003f, 0.870000005f, roughness_variation), math::lerp(0.0399999991f, 0.50999999f, roughness)) * histogram_range(float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).z, math::lerp(0.0700000003f, 0.870000005f, roughness_variation), math::lerp(0.0399999991f, 0.50999999f, roughness)), color(1.f, 1.f, 1.f), color(0.f, 0.f, 0.f), state::texture_tangent_u(0), df::scatter_reflect), bsdf(), endless_normal(texture_2d("./textures/brass_normal.jpg", ::tex::gamma_linear), bump_strength, false, false, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.5f, 0.5f, 0.999000013f), 6.12999964f)), state::normal()), df::tint(gradient_lookup_smooth(texture_2d("./textures/brass_gradients_yellow_gold_red.png", ::tex::gamma_srgb), math::pow(float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).z, 0.399999976f), brass_type_select), df::weighted_layer(0.119999997f, df::microfacet_ggx_smith_bsdf(histogram_range(float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).z, 0.170000002f, math::lerp(0.399999976f, 0.799999952f, roughness)) * histogram_range(float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).z, 0.170000002f, math::lerp(0.399999976f, 0.799999952f, roughness)), histogram_range(float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).z, 0.170000002f, math::lerp(0.399999976f, 0.799999952f, roughness)) * histogram_range(float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).z, 0.170000002f, math::lerp(0.399999976f, 0.799999952f, roughness)), color(1.f, 1.f, 1.f), color(1.f, 1.f, 1.f), state::texture_tangent_u(0), df::scatter_reflect), df::weighted_layer(1.f, df::microfacet_ggx_smith_bsdf(histogram_range(float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).z, math::lerp(0.0700000003f, 0.870000005f, roughness_variation), math::lerp(0.0399999991f, 0.50999999f, roughness)) * histogram_range(float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).z, math::lerp(0.0700000003f, 0.870000005f, roughness_variation), math::lerp(0.0399999991f, 0.50999999f, roughness)), histogram_range(float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).z, math::lerp(0.0700000003f, 0.870000005f, roughness_variation), math::lerp(0.0399999991f, 0.50999999f, roughness)) * histogram_range(float3(endless_texture(texture_2d("./textures/brass_multi_R_noise_G_scratches_B_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.523999989f, 0.112999998f, 0.591000021f), 6.12999964f, false)).z, math::lerp(0.0700000003f, 0.870000005f, roughness_variation), math::lerp(0.0399999991f, 0.50999999f, roughness)), color(1.f, 1.f, 1.f), color(0.f, 0.f, 0.f), state::texture_tangent_u(0), df::scatter_reflect), bsdf(), endless_normal(texture_2d("./textures/brass_normal.jpg", ::tex::gamma_linear), bump_strength, false, false, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.5f, 0.5f, 0.999000013f), 6.12999964f)), state::normal())), state::normal()), add_detail_normal(endless_normal(texture_2d("./textures/polish_norm.jpg", ::tex::gamma_linear), 0.600000024f, false, false, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.5f, 0.5f, 0.999000013f), 6.12999964f), endless_normal(texture_2d("./textures/brass_normal.jpg", ::tex::gamma_linear), bump_strength, false, false, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.5f, 0.5f, 0.999000013f), 6.12999964f))), endless_normal(texture_2d("./textures/brass_normal.jpg", ::tex::gamma_linear), bump_strength, false, false, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, base::texture_coordinate_uvw, uv_space_index), 6.08999968f, float3(0.5f, 0.5f, 0.999000013f), 6.12999964f)), material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		material_surface tmp2 = material_surface(scattering: bsdf(), emission: material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		color tmp3 = color(1.f, 1.f, 1.f);
+		material_volume tmp4 = material_volume(scattering: vdf(), absorption_coefficient: color(0.f, 0.f, 0.f), scattering_coefficient: color(0.f, 0.f, 0.f));
+		material_geometry tmp5(float3(0.f), 1.f, roundcorners_enable ? state::rounded_corner_normal(roundcorners_radius_mm * 0.00100000005f, roundcorners_across_materials, 1.f) : state::normal());
+		hair_bsdf tmp6 = hair_bsdf();
+	} in
+		material(
+			thin_walled: tmp0,
+			surface: tmp1,
+			backface: tmp2,
+			ior: tmp3,
+			volume: tmp4,
+			geometry: tmp5,
+			hair: tmp6);
+
+// 2
+export material Brass_Polished_Yellow_Matte_Polish(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Polished Yellow - Matte Polish"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Polished.Brass_Polished_Yellow_Matte_Polish.png"),
+	::anno::key_words(string[]("metal", "brass", "reflective", "polished", "new", "smudged", "design", "yellow", "warm"))
+]] = Brass_Polished
+(
+	polish_film_roughness:		0.15f,
+	polish_film_strength:		1.0f,
+	brass_type_select:			0.0f,	
+	roughness:					0.04f,
+	roughness_variation:		0.47f,
+	surface_dirt:				0.0f,
+	bump_strength:				0.0f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+
+// 3
+export material Brass_Polished_Yellow_Cloudy_Polish(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Polished Yellow - Cloudy Polish"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Polished.Brass_Polished_Yellow_Cloudy_Polish.png"),
+	::anno::key_words(string[]("metal", "brass", "reflective", "polished", "cloudy", "new", "smudged", "design", "yellow", "warm"))
+]] = Brass_Polished
+(
+	polish_film_roughness:		0.85f,
+	polish_film_strength:		1.0f,
+	brass_type_select:			0.0f,	
+	roughness:					0.04f,
+	roughness_variation:		0.48f,
+	surface_dirt:				0.31f,
+	bump_strength:				0.05f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+
+//4
+export material Brass_Polished_Yellow_Shiny_Worn(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Polished Yellow - Shiny Worn"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Polished.Brass_Polished_Yellow_Shiny_Worn.png"),
+	::anno::key_words(string[]("metal", "brass", "reflective", "polished", "old", "worn", "handled", "stained", "dirty", "bumped", "smudged", "design", "yellow", "warm"))
+]] = Brass_Polished
+(
+	polish_film_roughness:		0.5f,
+	polish_film_strength:		1.0f,
+	brass_type_select:			0.0f,	
+	roughness:					0.04f,
+	roughness_variation:		0.69f,
+	surface_dirt:				0.95f,
+	bump_strength:				0.44f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+//5
+export material Brass_Polished_Gold_Shiny_Polish(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Polished Gold - Shiny Polish"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Polished.Brass_Polished_Gold_Shiny_Polish.png"),
+	::anno::key_words(string[]("metal", "brass", "reflective", "polished", "old", "worn", "handled", "stained", "dirty", "bumped", "smudged", "design", "gold", "warm"))
+]] = Brass_Polished
+(
+	polish_film_roughness:		0.5f,
+	polish_film_strength:		1.0f,
+	brass_type_select:			0.0f,	
+	roughness:					0.04f,
+	roughness_variation:		0.69f,
+	surface_dirt:				0.95f,
+	bump_strength:				0.44f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+
+// 6
+export material Brass_Polished_Gold_Matte_Polish(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Polished Gold - Matte Polish"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Polished.Brass_Polished_Gold_Matte_Polish.png"),
+	::anno::key_words(string[]("metal", "brass", "reflective", "polished", "new", "smudged", "design", "gold", "warm"))
+]] = Brass_Polished
+(
+	polish_film_roughness:		0.15f,
+	polish_film_strength:		1.0f,
+	brass_type_select:			0.0f,	
+	roughness:					0.04f,
+	roughness_variation:		0.47f,
+	surface_dirt:				0.0f,
+	bump_strength:				0.0f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+
+// 7
+export material Brass_Polished_Gold_Cloudy_Polish(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Polished Gold - Cloudy Polish"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Polished.Brass_Polished_Gold_Cloudy_Polish.png"),
+	::anno::key_words(string[]("metal", "brass", "reflective", "polished", "cloudy", "new", "smudged", "design", "gold", "warm"))
+]] = Brass_Polished
+(
+	polish_film_roughness:		0.85f,
+	polish_film_strength:		1.0f,
+	brass_type_select:			0.0f,	
+	roughness:					0.04f,
+	roughness_variation:		0.48f,
+	surface_dirt:				0.31f,
+	bump_strength:				0.05f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+
+// 8
+export material Brass_Polished_Gold_Shiny_Worn(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Polished Gold - Shiny Worn"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Polished.Brass_Polished_Gold_Shiny_Worn.png"),
+	::anno::key_words(string[]("metal", "brass", "reflective", "polished", "old", "worn", "handled", "stained", "dirty", "bumped", "smudged", "design", "gold", "warm"))
+]] = Brass_Polished
+(
+	polish_film_roughness:		0.5f,
+	polish_film_strength:		1.0f,
+	brass_type_select:			0.0f,	
+	roughness:					0.04f,
+	roughness_variation:		0.69f,
+	surface_dirt:				0.95f,
+	bump_strength:				0.44f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+
+// 9
+export material Brass_Polished_Red_Shiny_Polish(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Polished Red - Shiny Polish"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Polished.Brass_Polished_Red_Shiny_Polish.png"),
+	::anno::key_words(string[]("metal", "brass", "reflective", "polished", "old", "worn", "handled", "stained", "dirty", "bumped", "smudged", "design", "red", "warm"))
+]] = Brass_Polished
+(
+	polish_film_roughness:		0.5f,
+	polish_film_strength:		1.0f,
+	brass_type_select:			0.0f,	
+	roughness:					0.04f,
+	roughness_variation:		0.69f,
+	surface_dirt:				0.95f,
+	bump_strength:				0.44f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+
+// 10
+export material Brass_Polished_Red_Matte_Polish(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Polished Red - Matte Polish"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Polished.Brass_Polished_Red_Matte_Polish.png"),
+	::anno::key_words(string[]("metal", "brass", "reflective", "polished", "new", "smudged", "design", "red", "warm"))
+]] = Brass_Polished
+(
+	polish_film_roughness:		0.15f,
+	polish_film_strength:		1.0f,
+	brass_type_select:			0.0f,	
+	roughness:					0.04f,
+	roughness_variation:		0.47f,
+	surface_dirt:				0.0f,
+	bump_strength:				0.0f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+
+// 11
+export material Brass_Polished_Red_Cloudy_Polish(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Polished Red - Cloudy Polish"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Polished.Brass_Polished_Red_Cloudy_Polish.png"),
+	::anno::key_words(string[]("metal", "brass", "reflective", "polished", "cloudy", "new", "smudged", "design", "red", "warm"))
+]] = Brass_Polished
+(
+	polish_film_roughness:		0.85f,
+	polish_film_strength:		1.0f,
+	brass_type_select:			0.0f,	
+	roughness:					0.04f,
+	roughness_variation:		0.48f,
+	surface_dirt:				0.31f,
+	bump_strength:				0.05f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+
+// 12
+export material Brass_Polished_Red_Shiny_Worn(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Polished Red - Shiny Worn"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Polished.Brass_Polished_Red_Shiny_Worn.png"),
+	::anno::key_words(string[]("metal", "brass", "reflective", "polished", "old", "worn", "handled", "stained", "dirty", "bumped", "smudged", "design", "red", "warm"))
+]] = Brass_Polished
+(
+	polish_film_roughness:		0.5f,
+	polish_film_strength:		1.0f,
+	brass_type_select:			0.0f,	
+	roughness:					0.04f,
+	roughness_variation:		0.69f,
+	surface_dirt:				0.95f,
+	bump_strength:				0.44f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+

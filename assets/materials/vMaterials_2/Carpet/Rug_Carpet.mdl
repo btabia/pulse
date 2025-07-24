@@ -1,0 +1,698 @@
+/******************************************************************************
+ *	 Copyright 2024 NVIDIA Corporation. All rights reserved.	 *
+ ******************************************************************************
+ 
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our 
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL 
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA's Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any 
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR 
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, 
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF 
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+mdl 1.6;
+
+import ::anno::*;
+import ::base::*;
+import ::df::*;
+import ::math::*;
+import ::state::*;
+import ::tex::*;
+import ::nvidia::core_definitions::blend_colors;
+import ::nvidia::core_definitions::dimension;
+
+
+const string COPYRIGHT = 
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+
+float remap(float input, float low, float high)
+{
+	//return low + input * (high - low);
+	return ::math::lerp(low, high, input);
+}
+
+float3 normalmap_normal(
+	uniform texture_2d texture,
+	float factor = 1.0,
+	::base::texture_coordinate_info uvw = ::base::texture_coordinate_info()
+)
+{
+	float3 lookup = (::tex::lookup_float3(texture, float2(uvw.position.x, uvw.position.y)) - float3(0.5)) * (factor * 2.0);
+	return ::math::normalize(uvw.tangent_u * lookup.x + uvw.tangent_v * lookup.y + ::state::normal() * (lookup.z + (1.0 - factor)));
+}
+
+
+::base::texture_coordinate_info transform_coordinate_2(
+	float4x4 transform										 
+		[[ anno::description("A transformation to be applied to the source coordinates. rotation_translation_scale() is a suggested means to compute the transformation matrix.") ]],
+	::base::texture_coordinate_info coordinate = ::base::texture_coordinate_info()
+		[[ anno::description("Coordinate, typically sourced from coordinate_source or coordinate_projection.") ]]
+) [[ 
+	::anno::description("Transform a texture coordinate by a matrix.") ,
+	::anno::noinline()
+  ]]
+{
+	// Version 2
+	float4 r_position = transform * float4(coordinate.position.x,coordinate.position.y,coordinate.position.z,1);
+	//try aproximating it for the case that the rotation is only aroud z and assuming the texture layout is nice and z is ~constant.
+	//just pretend there is no other rotation happening
+	//get rid of scaling and translation. Then extract fields where sin and cos would be in a simple 2d transform around z.
+	float4 u = transform[0];
+	float3 ru = ::math::normalize(float3(u.x,u.y,u.z));
+	float cos =  ru.x; 
+	float sin =  -ru.y;
+
+	
+	return ::base::texture_coordinate_info(
+		float3(r_position.x,r_position.y,r_position.z),
+		math::normalize(cos * coordinate.tangent_u - sin * coordinate.tangent_v),
+		math::normalize(cos * coordinate.tangent_v + sin * coordinate.tangent_u));
+}
+
+// Takes the standard input that every material has. It combines a couple of
+// functions in one convenience function.
+::base::texture_coordinate_info vmat_transform(
+								float2 translation = float2(0.0, 0.0),
+								float rotation	 = 0.0,				// rotation in degrees
+								float2 scaling	 = float2(1.0, 1.0),
+								uniform ::base::texture_coordinate_system system = ::base::texture_coordinate_uvw,
+								uniform int uv_space	   = 0
+)
+{
+	float rotation_rad = (rotation * 3.1415926535897932384626433832f) / 180.f;
+	float4x4 scale =
+	float4x4(1.0 /scaling.x, 0.			 ,  0. ,	 0.,
+			 0.			, 1.0 /scaling.y ,  0. ,	 0.,
+			 0.			, 0.			 ,  1.0,	 0.,
+			 translation.x , translation.y  ,  0.0,	 1.);
+
+	float s = ::math::sin(rotation_rad);
+	float c = ::math::cos(rotation_rad);
+	float4x4 rotate =
+	float4x4(  c  ,  -s   , 0.0 , 0.0,
+			   s  ,   c   , 0.0 , 0.0,
+			   0.0,   0.0 , 1.0 , 0.0,
+			   0. ,   0.0 , 0.0 , 1.);
+	
+	return transform_coordinate_2(scale*rotate, ::base::coordinate_source(system, uv_space));
+}
+
+::base::texture_coordinate_info vmat_transform_post_scale(
+	::base::texture_coordinate_info uvw,
+	float2 scale = float2(1.0f)
+)
+{
+	return ::base::texture_coordinate_info(
+		position: float3(uvw.position.x / scale.x,
+						uvw.position.y / scale.y,
+						uvw.position.z),
+		tangent_u: uvw.tangent_u,
+		tangent_v: uvw.tangent_v
+	);
+}
+
+
+float3 rgb2hsl(float3 c)
+[[
+	::anno::description("Converts a color value to HSL. The function outputs the hue to \n"
+						"lie in the range from 0.0-1.0."),
+	::anno::author("NVIDIA vMaterials")
+]]
+{
+	float3 hsl;
+	float cMax = ::math::max(::math::max(c.x, c.y), c.z);
+	float cMin = ::math::min(::math::min(c.x, c.y), c.z);
+	float delta = cMax - cMin;
+	
+	hsl.z = (cMax + cMin) / 2.0;	
+	hsl.x = ((cMax == cMin) ? 0 :
+		(cMax == c.x) ? (c.y - c.z) / delta + ((c.z > c.y) ? 6.0f : 0.0f):
+		(cMax == c.y) ? (c.z - c.x) / delta + 2.0 : (c.x - c.y) / delta + 4.0) / 6.0f;
+	hsl.y = (hsl.z == 0.0 || hsl.z == 1.0) ? 0.0 : delta / (1.0 - ::math::abs(2.0 * hsl.z - 1.0));
+	return hsl;
+}
+
+
+// converts a HSL value back to a color
+// The Hue is expected to lie in the range 
+float f_n(float n, float a,  float h, float l) {
+	float k = ::math::fmod(n + h * 12.f, 12.f);
+	
+	return l - a * ::math::max(-1.0f, ::math::min(::math::min(k-3.0f, 9.0f-k), 1.0f));
+}
+
+color hsl2rgb(float3 hsl)
+[[
+	::anno::description("Converts a HSL value back to a color. Note that the hue is expected to \n"
+						"lie in the range from 0.0-1.0."),
+	::anno::author("NVIDIA vMaterials")
+]]
+{
+	float h = hsl.x, s = hsl.y, l = hsl.z;
+	float a = s * ::math::min(l, 1.0f - l);
+	return color(f_n(0.0, a, h, l),
+				f_n(8.0, a, h, l),
+				f_n(4.0, a, h, l));	
+}
+
+float histogram_range(float input, float range = 1.0f, float position = 0.5f)
+{	
+	float low = ::math::clamp(1.0 - ::math::min(((1.0 - position) + range * 0.5), (1.0 - position) * 2), 0.0, 1.0);
+	float high = ::math::clamp(::math::min((position + range * 0.5 ), position * 2.0), 0.0, 1.0);
+	return ::math::lerp(low, high, input);
+}
+
+base::anisotropy_return anisotropy_conversion(
+	float roughness = 0.0 ,
+	float anisotropy = 0.0 ,
+	float anisotropy_rotation = 0.0 ,
+	float3 tangent_u = state::texture_tangent_u(0) 
+)
+{
+	base::anisotropy_return return_value(
+		roughness_u: roughness * roughness,
+		roughness_v: roughness * roughness,
+		tangent_u: tangent_u
+	);
+	if (anisotropy > 0.f) {
+		// Allows for infinite anisotropy when roughness==0, full roughness when anisotropy==0 (saturated later on)
+		return_value.roughness_u += math::pow(anisotropy,4);
+
+		if (anisotropy_rotation > 0.f && anisotropy_rotation < 1.f) {
+			float3 tangent_v = math::cross(state::normal(), tangent_u);		 // assumed these are normalized already
+			float rotation_angle = 2.f * math::PI * anisotropy_rotation;
+			return_value.tangent_u = tangent_u * math::cos(rotation_angle) - tangent_v * math::sin(rotation_angle);
+		}
+	}
+	return_value.roughness_u = math::min(1.f, return_value.roughness_u);
+	return_value.roughness_v = math::min(1.f, return_value.roughness_v);
+	
+	return return_value;
+}
+
+export material Rug_Carpet_Base(
+	color carpet_color = color(0.139f, 0.139f, 0.139f) [[
+		::anno::description("Adjusts the color of the rug while keeping bright fibers well visible."),
+		::anno::display_name("Carpet Color"),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(0)
+	]],
+	float roughness = 0.48f [[
+		::anno::description("Higher values lead to a less shiny appearance of the carpet."),
+		::anno::display_name("Reflection Roughness"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(1)
+	]],
+	float roughness_variation = 0.04f [[
+		::anno::description("Adds variation to the roughness of the rug."),
+		::anno::display_name("Roughness Variation"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(2)
+	]],
+	float pattern_AO = 0.59f [[
+		::anno::description("Adds darkening around the pattern of the rug."),
+		::anno::display_name("Pattern Visibility"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(3)
+	]],
+	float bump_strength = 1.f [[
+		::anno::description("Adjusts the bumpiness of the pattern."),
+		::anno::display_name("Bump Strength"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 2.f),
+		::anno::soft_range(0.f, 1.f),
+		::anno::ui_order(4)
+	]],
+	uniform float2 texture_translate = float2(0.f) [[
+		::anno::description("Controls the position of the texture."),
+		::anno::display_name("Texture Translate"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(5)
+	]],
+	uniform float texture_rotate = 0.f [[
+		::anno::description("Rotates angle of the texture in degrees."),
+		::anno::display_name("Texture Rotate"),
+		::anno::in_group("Transform"),
+		::anno::soft_range(0.f, 360.f),
+		::anno::ui_order(6)
+	]],
+	uniform float2 texture_scale = float2(1.f) [[
+		::anno::description("Larger numbers increase the size."),
+		::anno::display_name("Texture Scale"),
+		::anno::in_group("Transform"),
+		::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+		::anno::ui_order(7)
+	]],
+	uniform bool roundcorners_enable = false [[
+		::anno::description("Enables the round corner effect. Comes at a slight performance cost as additional raytracing calls are required to evaluate the round corner effect."),
+		::anno::display_name("Enable Round Corners"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(8)
+	]],
+	uniform float roundcorners_radius_mm = 1.5f [[
+		::anno::description("Radius of the rounded corners in millimeters."),
+		::anno::display_name("Round Corner Radius (mm)"),
+		::anno::in_group("Round Corners"),
+		::anno::soft_range(0.f, 10.f),
+		::anno::ui_order(9)
+	]],
+	uniform bool roundcorners_across_materials = false [[
+		::anno::description("Applies the round corner effect across different materials when enabled."),
+		::anno::display_name("Across Materials"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(10)
+	]],
+	uniform int uv_space_index = 0 [[
+		::anno::description("Uses selected UV space for material."),
+		::anno::display_name("UV Space Index"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(11)
+	]],
+	// the exchangeable textures
+	uniform texture_2d rug_fibers = texture_2d("./textures/rug_carpet_multi_fibers.jpg", ::tex::gamma_linear),
+	uniform texture_2d rug_aniso  = texture_2d("./textures/rug_carpet_anisotropy.jpg", ::tex::gamma_linear),
+	uniform texture_2d rug_multi_R_rough_G_ao_B_patternao = texture_2d("./textures/rug_carpet_01_multi_R_rough_G_ao_B_bumpao.jpg", ::tex::gamma_linear),
+	uniform texture_2d rug_normal = texture_2d("./textures/rug_carpet_01_norm.jpg", ::tex::gamma_linear)
+	)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Rug Carpet Template"),
+	::anno::description("Template for Rug Carpet Material."),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Rug_Carpet.Rug_Carpet_Base.png"),
+	::anno::key_words(string[]("carpet", "fabric", "design", "automotive", "architecture", "interior", "new", "rough", "bumped", "gray")),
+	::anno::hidden()
+]]
+ = 
+	let {
+
+		
+		bool tmp0 = false;
+		material_surface tmp1(::df::custom_curve_layer(0.0399999991f, 1.f, 5.f, 1.f, ::df::microfacet_ggx_smith_bsdf(anisotropy_conversion(remap(roughness, 0.370000005f, 0.229999989f) * roughness_variation * ::base::file_texture(rug_aniso, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 0.f, int2(0), ::tex::wrap_repeat, 30.f).mono + histogram_range(float3(::base::file_texture(rug_multi_R_rough_G_ao_B_patternao, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 0.f, int2(0), ::tex::wrap_repeat, 30.f).tint).x, 1.f, remap(roughness, 0.370000005f, 0.680000007f)), 0.680000007f, ::base::file_texture(rug_aniso, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 0.f, int2(0), ::tex::wrap_repeat, 30.f).mono, ::state::texture_tangent_u(0)).roughness_u, anisotropy_conversion(remap(roughness, 0.370000005f, 0.229999989f) * roughness_variation * ::base::file_texture(rug_aniso, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 0.f, int2(0), ::tex::wrap_repeat, 30.f).mono + histogram_range(float3(::base::file_texture(rug_multi_R_rough_G_ao_B_patternao, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 0.f, int2(0), ::tex::wrap_repeat, 30.f).tint).x, 1.f, remap(roughness, 0.370000005f, 0.680000007f)), 0.680000007f, ::base::file_texture(rug_aniso, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 0.f, int2(0), ::tex::wrap_repeat, 30.f).mono, ::state::texture_tangent_u(0)).roughness_v, color(::math::lerp(1.f, float3(::base::file_texture(rug_multi_R_rough_G_ao_B_patternao, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 0.f, int2(0), ::tex::wrap_repeat, 30.f).tint).y, 0.310000002f) * float3(::base::file_texture(rug_multi_R_rough_G_ao_B_patternao, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 0.f, int2(0), ::tex::wrap_repeat, 30.f).tint).z), color(0.f, 0.f, 0.f), anisotropy_conversion(remap(roughness, 0.370000005f, 0.229999989f) * roughness_variation * ::base::file_texture(rug_aniso, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 0.f, int2(0), ::tex::wrap_repeat, 30.f).mono + histogram_range(float3(::base::file_texture(rug_multi_R_rough_G_ao_B_patternao, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 0.f, int2(0), ::tex::wrap_repeat, 30.f).tint).x, 1.f, remap(roughness, 0.370000005f, 0.680000007f)), 0.680000007f, ::base::file_texture(rug_aniso, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 0.f, int2(0), ::tex::wrap_repeat, 30.f).mono, ::state::texture_tangent_u(0)).tangent_u, ::df::scatter_reflect), ::df::weighted_layer(0.5f, ::df::diffuse_reflection_bsdf(nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(hsl2rgb(rgb2hsl(float3(carpet_color)) * float3(1.f, 1.f, 0.519999981f)), carpet_color, ::base::color_layer_blend, float3(::math::pow(::base::file_texture(rug_fibers, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform_post_scale(vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, ::base::texture_coordinate_uvw, uv_space_index), float2(1.f)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 0.f, int2(0), ::tex::wrap_repeat, 30.f).tint, 2.20000005f)).x, true).tint, hsl2rgb(float3(rgb2hsl(float3(carpet_color)).x, rgb2hsl(float3(carpet_color)).y * 0.5f, remap(rgb2hsl(float3(carpet_color)).z, 0.519999981f, 1.f))), ::base::color_layer_blend, float3(::math::pow(::base::file_texture(rug_fibers, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform_post_scale(vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, ::base::texture_coordinate_uvw, uv_space_index), float2(1.f)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 0.f, int2(0), ::tex::wrap_repeat, 30.f).tint, 2.20000005f)).y, true).tint, hsl2rgb(float3(rgb2hsl(float3(carpet_color)).x, rgb2hsl(float3(carpet_color)).y, remap(rgb2hsl(float3(carpet_color)).z, 0.5f, 1.f))), ::base::color_layer_blend, float3(::math::pow(::base::file_texture(rug_fibers, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform_post_scale(vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, ::base::texture_coordinate_uvw, uv_space_index), float2(1.f)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 0.f, int2(0), ::tex::wrap_repeat, 30.f).tint, 2.20000005f)).z, true).tint, color(float3(::base::file_texture(rug_multi_R_rough_G_ao_B_patternao, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 0.f, int2(0), ::tex::wrap_repeat, 30.f).tint).z), ::base::color_layer_multiply, pattern_AO, true).tint, color(float3(::base::file_texture(rug_multi_R_rough_G_ao_B_patternao, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 0.f, int2(0), ::tex::wrap_repeat, 30.f).tint).y), ::base::color_layer_multiply, 0.550000012f, true).tint, 0.f), bsdf(), normalmap_normal(rug_normal, bump_strength, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, ::base::texture_coordinate_uvw, uv_space_index))), normalmap_normal(rug_normal, bump_strength, vmat_transform(texture_translate, texture_rotate, texture_scale * 0.5f, ::base::texture_coordinate_uvw, uv_space_index))), material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		material_surface tmp2 = material_surface(scattering: bsdf(), emission: material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		color tmp3 = color(1.f, 1.f, 1.f);
+		material_volume tmp4 = material_volume(scattering: vdf(), absorption_coefficient: color(0.f, 0.f, 0.f), scattering_coefficient: color(0.f, 0.f, 0.f));
+		material_geometry tmp5(float3(0.f), 1.f, roundcorners_enable ? ::state::rounded_corner_normal(roundcorners_radius_mm * 0.00100000005f, roundcorners_across_materials, 1.f) : ::state::normal());
+	} in
+		material(
+			thin_walled: tmp0,
+			surface: tmp1,
+			backface: tmp2,
+			ior: tmp3,
+			volume: tmp4,
+			geometry: tmp5);
+
+
+// 1
+export material Rug_Carpet_Lines(
+		color carpet_color = color(0.139f, 0.139f, 0.139f) [[
+		::anno::description("Adjusts the color of the rug while keeping bright fibers well visible."),
+		::anno::display_name("Carpet Color"),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(0)
+	]],
+	float roughness = 0.48f [[
+		::anno::description("Higher values lead to a less shiny appearance of the carpet."),
+		::anno::display_name("Roughness"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(1)
+	]],
+	float roughness_variation = 0.04f [[
+		::anno::description("Adds variation to the roughness of the rug."),
+		::anno::display_name("Roughness Variation"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(2)
+	]],
+	float pattern_AO = 0.59f [[
+		::anno::description("Adds darkening around the pattern of the rug."),
+		::anno::display_name("Pattern Visibility"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(3)
+	]],
+	float bump_strength = 1.f [[
+		::anno::description("Adjusts the bumpiness of the pattern."),
+		::anno::display_name("Bump Strength"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 2.f),
+		::anno::soft_range(0.f, 1.f),
+		::anno::ui_order(4)
+	]],
+	uniform float2 texture_translate = float2(0.f) [[
+		::anno::description("Controls the position of the texture."),
+		::anno::display_name("Texture Translate"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(5)
+	]],
+	uniform float texture_rotate = 0.f [[
+		::anno::description("Rotates angle of the texture in degrees."),
+		::anno::display_name("Texture Rotate"),
+		::anno::in_group("Transform"),
+		::anno::soft_range(0.f, 360.f),
+		::anno::ui_order(6)
+	]],
+	uniform float2 texture_scale = float2(1.f) [[
+		::anno::description("Larger numbers increase the size."),
+		::anno::display_name("Texture Scale"),
+		::anno::in_group("Transform"),
+		::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+		::anno::ui_order(7)
+	]],
+	uniform bool roundcorners_enable = false [[
+		::anno::description("Enables the round corner effect. Comes at a slight performance cost as additional raytracing calls are required to evaluate the round corner effect."),
+		::anno::display_name("Enable Round Corners"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(8)
+	]],
+	uniform float roundcorners_radius_mm = 1.5f [[
+		::anno::description("Radius of the rounded corners in millimeters."),
+		::anno::display_name("Round Corner Radius (mm)"),
+		::anno::in_group("Round Corners"),
+		::anno::soft_range(0.f, 10.f),
+		::anno::ui_order(9)
+	]],
+	uniform bool roundcorners_across_materials = false [[
+		::anno::description("Applies the round corner effect across different materials when enabled."),
+		::anno::display_name("Across Materials"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(10)
+	]],
+	uniform int uv_space_index = 0 [[
+		::anno::description("Uses selected UV space for material."),
+		::anno::display_name("UV Space Index"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(11)
+	]]
+) 
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Rug Carpet - Lines Pattern"),
+	::anno::description("Rug Carpet Material with line pattern."),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Rug_Carpet.Rug_Carpet_Lines.png"),
+	::anno::key_words(string[]("carpet", "fabric", "design", "automotive", "architecture", "pattern", "lines", "interior", "new", "rough", "bumped", "gray"))
+]] = Rug_Carpet_Base(
+	carpet_color:			carpet_color,
+	roughness:				roughness,
+	roughness_variation:	roughness_variation,
+	pattern_AO:				pattern_AO,
+	bump_strength:			bump_strength,
+	texture_translate:		texture_translate,
+	texture_rotate:			texture_rotate,
+	texture_scale:			texture_scale,
+	roundcorners_enable:	roundcorners_enable,
+	roundcorners_radius_mm:	roundcorners_radius_mm,
+	roundcorners_across_materials: roundcorners_across_materials,
+	uv_space_index:			uv_space_index,
+	rug_fibers:				texture_2d("./textures/rug_carpet_multi_fibers.jpg", ::tex::gamma_linear),
+	rug_aniso:				texture_2d("./textures/rug_carpet_anisotropy.jpg", ::tex::gamma_linear),
+	rug_multi_R_rough_G_ao_B_patternao: texture_2d("./textures/rug_carpet_01_multi_R_rough_G_ao_B_bumpao.jpg", ::tex::gamma_linear),
+	rug_normal:				texture_2d("./textures/rug_carpet_01_norm.jpg", ::tex::gamma_linear)
+);
+
+
+// 2
+export material Rug_Carpet_Hexagonal(
+		color carpet_color = color(0.139f, 0.139f, 0.139f) [[
+		::anno::description("Adjusts the color of the rug while keeping bright fibers well visible."),
+		::anno::display_name("Carpet Color"),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(0)
+	]],
+	float roughness = 0.48f [[
+		::anno::description("Higher values lead to a less shiny appearance of the carpet."),
+		::anno::display_name("Roughness"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(1)
+	]],
+	float roughness_variation = 0.04f [[
+		::anno::description("Adds variation to the roughness of the rug."),
+		::anno::display_name("Roughness Variation"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(2)
+	]],
+	float pattern_AO = 0.59f [[
+		::anno::description("Adds darkening around the pattern of the rug."),
+		::anno::display_name("Pattern Visibility"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(3)
+	]],
+	float bump_strength = 1.f [[
+		::anno::description("Adjusts the bumpiness of the pattern."),
+		::anno::display_name("Bump Strength"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 2.f),
+		::anno::soft_range(0.f, 1.f),
+		::anno::ui_order(4)
+	]],
+	uniform float2 texture_translate = float2(0.f) [[
+		::anno::description("Controls the position of the texture."),
+		::anno::display_name("Texture Translate"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(5)
+	]],
+	uniform float texture_rotate = 0.f [[
+		::anno::description("Rotates angle of the texture in degrees."),
+		::anno::display_name("Texture Rotate"),
+		::anno::in_group("Transform"),
+		::anno::soft_range(0.f, 360.f),
+		::anno::ui_order(6)
+	]],
+	uniform float2 texture_scale = float2(1.f) [[
+		::anno::description("Larger numbers increase the size."),
+		::anno::display_name("Texture Scale"),
+		::anno::in_group("Transform"),
+		::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+		::anno::ui_order(7)
+	]],
+	uniform bool roundcorners_enable = false [[
+		::anno::description("Enables the round corner effect. Comes at a slight performance cost as additional raytracing calls are required to evaluate the round corner effect."),
+		::anno::display_name("Enable Round Corners"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(8)
+	]],
+	uniform float roundcorners_radius_mm = 1.5f [[
+		::anno::description("Radius of the rounded corners in millimeters."),
+		::anno::display_name("Round Corner Radius (mm)"),
+		::anno::in_group("Round Corners"),
+		::anno::soft_range(0.f, 10.f),
+		::anno::ui_order(9)
+	]],
+	uniform bool roundcorners_across_materials = false [[
+		::anno::description("Applies the round corner effect across different materials when enabled."),
+		::anno::display_name("Across Materials"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(10)
+	]],
+	uniform int uv_space_index = 0 [[
+		::anno::description("Uses selected UV space for material."),
+		::anno::display_name("UV Space Index"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(11)
+	]]
+) 
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Rug Carpet - Hexagonal Pattern"),
+	::anno::description("Rug carpet material with hexagonal pattern."),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Rug_Carpet.Rug_Carpet_Hexagonal.png"),
+	::anno::key_words(string[]("carpet", "fabric", "design", "automotive", "architecture", "pattern", "hexagonal", "interior", "new", "rough", "bumped", "gray"))
+]] = Rug_Carpet_Base(
+	carpet_color:			carpet_color,
+	roughness:				roughness,
+	roughness_variation:	roughness_variation,
+	pattern_AO:				pattern_AO,
+	bump_strength:			bump_strength,
+	texture_translate:		texture_translate,
+	texture_rotate:			texture_rotate,
+	texture_scale:			texture_scale,
+	roundcorners_enable:	roundcorners_enable,
+	roundcorners_radius_mm:	roundcorners_radius_mm,
+	roundcorners_across_materials: roundcorners_across_materials,
+	uv_space_index:			uv_space_index,
+	rug_fibers:				texture_2d("./textures/rug_carpet_multi_fibers.jpg", ::tex::gamma_linear),
+	rug_aniso:				texture_2d("./textures/rug_carpet_anisotropy.jpg", ::tex::gamma_linear),
+	rug_multi_R_rough_G_ao_B_patternao: texture_2d("./textures/rug_carpet_02_multi_R_rough_G_ao_B_bumpao.jpg", ::tex::gamma_linear),
+	rug_normal:				texture_2d("./textures/rug_carpet_02_norm.jpg", ::tex::gamma_linear)
+);
+
+
+// 3
+export material Rug_Carpet_Honeycomb(
+		color carpet_color = color(0.139f, 0.139f, 0.139f) [[
+		::anno::description("Adjusts the color of the rug while keeping bright fibers well visible."),
+		::anno::display_name("Carpet Color"),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(0)
+	]],
+	float roughness = 0.48f [[
+		::anno::description("Higher values lead to a less shiny appearance of the carpet."),
+		::anno::display_name("Roughness"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(1)
+	]],
+	float roughness_variation = 0.04f [[
+		::anno::description("Adds variation to the roughness of the rug."),
+		::anno::display_name("Roughness Variation"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(2)
+	]],
+	float pattern_AO = 0.59f [[
+		::anno::description("Adds darkening around the pattern of the rug."),
+		::anno::display_name("Pattern Visibility"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(3)
+	]],
+	float bump_strength = 1.f [[
+		::anno::description("Adjusts the bumpiness of the pattern."),
+		::anno::display_name("Bump Strength"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 2.f),
+		::anno::soft_range(0.f, 1.f),
+		::anno::ui_order(4)
+	]],
+	uniform float2 texture_translate = float2(0.f) [[
+		::anno::description("Controls the position of the texture."),
+		::anno::display_name("Texture Translate"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(5)
+	]],
+	uniform float texture_rotate = 0.f [[
+		::anno::description("Rotates angle of the texture in degrees."),
+		::anno::display_name("Texture Rotate"),
+		::anno::in_group("Transform"),
+		::anno::soft_range(0.f, 360.f),
+		::anno::ui_order(6)
+	]],
+	uniform float2 texture_scale = float2(1.f) [[
+		::anno::description("Larger numbers increase the size."),
+		::anno::display_name("Texture Scale"),
+		::anno::in_group("Transform"),
+		::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+		::anno::ui_order(7)
+	]],
+	uniform bool roundcorners_enable = false [[
+		::anno::description("Enables the round corner effect. Comes at a slight performance cost as additional raytracing calls are required to evaluate the round corner effect."),
+		::anno::display_name("Enable Round Corners"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(8)
+	]],
+	uniform float roundcorners_radius_mm = 1.5f [[
+		::anno::description("Radius of the rounded corners in millimeters."),
+		::anno::display_name("Round Corner Radius (mm)"),
+		::anno::in_group("Round Corners"),
+		::anno::soft_range(0.f, 10.f),
+		::anno::ui_order(9)
+	]],
+	uniform bool roundcorners_across_materials = false [[
+		::anno::description("Applies the round corner effect across different materials when enabled."),
+		::anno::display_name("Across Materials"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(10)
+	]],
+	uniform int uv_space_index = 0 [[
+		::anno::description("Uses selected UV space for material."),
+		::anno::display_name("UV Space Index"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(11)
+	]]
+)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Rug Carpet - Honeycomb"),
+	::anno::description("Rug carpet material with stylized honeycomb pattern."),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Rug_Carpet.Rug_Carpet_Honeycomb.png"),
+	::anno::key_words(string[]("carpet", "fabric", "design", "automotive", "architecture", "pattern", "honeycomb", "modern", "hexagonal", "interior", "new", "rough", "bumped", "gray"))
+]] = Rug_Carpet_Base(
+	carpet_color:			carpet_color,
+	roughness:				roughness,
+	roughness_variation:	roughness_variation,
+	pattern_AO:				pattern_AO,
+	bump_strength:			bump_strength,
+	texture_translate:		texture_translate,
+	texture_rotate:			texture_rotate,
+	texture_scale:			texture_scale,
+	roundcorners_enable:	roundcorners_enable,
+	roundcorners_radius_mm:	roundcorners_radius_mm,
+	roundcorners_across_materials: roundcorners_across_materials,
+	uv_space_index:			uv_space_index,
+	rug_fibers:				texture_2d("./textures/rug_carpet_multi_fibers.jpg", ::tex::gamma_linear),
+	rug_aniso:				texture_2d("./textures/rug_carpet_anisotropy.jpg", ::tex::gamma_linear),
+	rug_multi_R_rough_G_ao_B_patternao: texture_2d("./textures/rug_carpet_03_multi_R_rough_G_ao_B_bumpao.jpg", ::tex::gamma_linear),
+	rug_normal:				texture_2d("./textures/rug_carpet_03_norm.jpg", ::tex::gamma_linear)
+);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,62 @@
+---
+RL:
+  policy: PPO
+  max_timestep: 50000
+  headless: True
+  disable_progressbar: True
+  checkpoint:
+    saving_freq: 50000
+    base_directory: "./training_data/"
+  vision_h: 64
+  vision_w: 64
+  tool_num_obs: 7
+  load_policy: True
+  #load_policy_path: "/home/btabia/git/new/Malleabot/training_data/25-06-02_21-59-29-384769_PPO/checkpoints/best_agent.pt"
+  load_policy_path: "/home/btabia/git/new/Malleabot/training_data/25-06-24_20-24-40-894963_PPO/checkpoints/best_agent.pt" # eager-universe-85
+  seed: 42
+  
+  algo:
+    activation: "relu"
+    arch: [128,128]
+    type: "PPO" 
+    feature_extractor: "CNN"
+    lstm: False
+    rollouts: 8192
+    learning_epochs: 10
+    mini_batch_size: 128
+    discount_factor: 0.99
+    lambda: 0.95
+    learning_rate: 1.25e-3
+    learning_rate_scheduler: KLAdaptiveRL
+    kl_threshold: 0.02038574160367481
+    kl_threshold_stop: 0.0
+    lr_gamma: 0.97
+    max_lr: 1e-3
+    min_lr: 1e-6
+    grad_norm_clip: 0.5516627344833842
+    ratio_clip: 0.20
+    value_clip: 0.20
+    clip_predicted_values: False
+    entropy_loss_scale: 0.0001
+    value_loss_scale: 0.7629891938764854
+    state_preprocessor: RunningStandardScaler
+    value_preprocessor: RunningStandardScaler
+    device: "cuda:${oc.env:CUDA_DEVICE}"
+    tensorboard_log: "./training_data/"
+
+  experiment: 
+    directory: "./training_data/"
+    experiment_name: ""
+    write_interval: 512 # Not used, we use the rollout value instead
+    checkpoint_interval: 1000
+    store_separately: False
+    wandb: True 
+    wandb_kwargs: 
+      project: admipush_ppo
+      mode: online
+      monitor_gym: True
+      sync_tensorboard: True
+
+
+
+

@@ -1,0 +1,272 @@
+/******************************************************************************
+ *			Copyright 2024 NVIDIA Corporation. All rights reserved.		   *
+ ******************************************************************************
+
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA’s Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL,
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+
+mdl 1.5;
+
+import ::anno::*;
+import ::base::*;
+import ::df::*;
+import ::math::*;
+import ::state::*;
+import ::tex::*;
+import ::nvidia::core_definitions::blend_colors;
+import ::nvidia::core_definitions::dimension;
+
+
+
+
+const string COPYRIGHT =
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n"
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n"
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+const string DESCRIPTION = "A gold metal material for printed circuit boards (PCB)";
+
+::base::texture_coordinate_info vmat_transform(
+								uniform float2 translation = float2(0.0, 0.0),
+								uniform float rotation	 = 0.0,
+								uniform float2 scaling	 = float2(1.0, 1.0),
+								uniform ::base::texture_coordinate_system system = ::base::texture_coordinate_uvw,
+								uniform int uv_space	   = 0
+)
+{
+	float rotation_rad = (rotation * 3.1415926535897932384626433832f) / 180.f;
+	
+	float4x4 scale =
+	float4x4(1.0 /scaling.x, 0.			 ,  0. ,	 0.,
+			 0.			, 1.0 /scaling.y ,  0. ,	 0.,
+			 0.			, 0.			 ,  1.0,	 0.,
+			 translation.x , translation.y  ,  0.0,	 1.);
+
+	float s = ::math::sin(rotation_rad);
+	float c = ::math::cos(rotation_rad);
+	float4x4 rotate =
+	float4x4(  c  ,  -s   , 0.0 , 0.0,
+			   s  ,   c   , 0.0 , 0.0,
+			   0.0,   0.0 , 1.0 , 0.0,
+			   0. ,   0.0 , 0.0 , 1.);
+	
+	return ::base::transform_coordinate(scale*rotate, ::base::coordinate_source(system, uv_space));
+}
+
+export material PCB_Goldfinger(
+	color grazing_reflectivity = color(1.f, 1.f, 1.f) [[
+		::anno::description("Sets the reflection color at grazing reflectivity levels."),
+		::anno::display_name("Grazing Reflectivity"),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(0)
+	]],
+	float reflection_roughness = 0.f [[
+		::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+		::anno::display_name("Roughness"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(1)
+	]],
+	float reflection_smooth = 0.f [[
+		::anno::description("Adds blurrier reflection that follow the intensities of the Roughness texture on top."),
+		::anno::display_name("Reflection Smooth"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(2)
+	]],
+	uniform float bump_strength = .2f [[
+		::anno::description("Specifies the strength of the bump."),
+		::anno::display_name("Bump Strength"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(3)
+	]],
+	uniform float2 texture_translate = float2(0.f) [[
+		::anno::description("Controls the position of the texture."),
+		::anno::display_name("Translate"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(4)
+	]],
+	uniform float texture_rotate = 0.f [[
+		::anno::description("Rotates angle of the texture in degrees."),
+		::anno::display_name("Rotate"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(5)
+	]],
+	uniform float2 texture_scale = float2(1.f) [[
+		::anno::description("Larger numbers increase the size."),
+		::anno::display_name("Scale"),
+		::anno::in_group("Transform"),
+		::nvidia::core_definitions::dimension(float2(.4f, .4f)),
+		::anno::ui_order(6)
+	]],
+	uniform bool enable_round_corners = false [[
+		::anno::description("Enables the round corner effect. Comes at a slight performance cost as additional raytracing calls are required to evaluate the round corner effect."),
+		::anno::display_name("Enable Round Corners"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(7)
+	]],
+	uniform float radius = 0.0340000018f [[
+		::anno::description("Radius of the rounded corners."),
+		::anno::display_name("Round Corner Radius"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(8)
+	]],
+	uniform bool across_materials = false [[
+		::anno::description("Applies the round corner effect across different materials when enabled."),
+		::anno::display_name("Across Materials"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(9)
+	]],
+		uniform bool no_uv = false [[
+		::anno::description("Set this to true if your model has no UV layout."),
+		::anno::display_name("No UV"),
+		::anno::in_group("Advanced", "Projection"),
+		::anno::ui_order(10)
+	]],
+	uniform ::base::projection_mode projection_type = ::base::projection_planar [[
+		::anno::description("Projection method to be used to generate the coordinates."),
+		::anno::display_name("Projection Type"),
+		::anno::in_group("Advanced", "Projection"),
+		::anno::ui_order(11)
+	]],
+	uniform float scale = 1.f [[
+		::anno::description("Scales the texture while No UV is true."),
+		::anno::display_name("Scale Projection"),
+		::anno::in_group("Advanced", "Projection"),
+		::anno::ui_order(12)
+	]],
+	uniform ::base::texture_coordinate_system coordinate_system = ::base::texture_coordinate_object [[
+		::anno::description("The projection can be done based on world or object space. Do not use uvw space. Since it is disabled while No UV is set to true."),
+		::anno::display_name("Coordinate System"),
+		::anno::in_group("Advanced", "Projection"),
+		::anno::ui_order(13)
+	]],
+	uniform int uv_space_index = 0 [[
+		::anno::description("Use selected UV space for material."),
+		::anno::display_name("UV Space Index"),
+		::anno::in_group("Advanced"),
+		::anno::ui_order(14)
+	]])
+[[
+	::anno::description(DESCRIPTION),
+	::anno::display_name("PCB Goldfinger"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::key_words(string[]("conductiv", "metal", "gold", "finger", "pcb", "plate", "computer", "yellow", "shiny", "bumped", "metallic", "construction", "light", "warm", "reflective")),
+	::anno::thumbnail("./.thumbs/PCB_Goldfinger.PCB_Goldfinger.png"),
+	::anno::author("Nvidia vMaterials"),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab")
+]]
+ = 
+	let {
+		bool tmp0 = false;
+		material_surface tmp1(::df::color_custom_curve_layer(color(1.f, 0.766744, 0.334458f), grazing_reflectivity, 5.f, color(1.f, 1.f, 1.f), ::df::microfacet_ggx_smith_bsdf(::math::lerp(::math::lerp(0.f, 0.800000012f, reflection_roughness) * ::math::lerp(0.f, 0.800000012f, reflection_roughness), ::math::lerp(0.f, 0.800000012f, reflection_roughness) * ::math::lerp(0.f, 0.800000012f, reflection_roughness) + reflection_smooth * (1.f - ::math::lerp(0.f, 0.800000012f, reflection_roughness) * ::math::lerp(0.f, 0.800000012f, reflection_roughness)), ::base::file_texture(texture_2d("./textures/pcb_goldfinger_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, no_uv ? ::base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono) * ::math::lerp(::math::lerp(0.f, 0.800000012f, reflection_roughness) * ::math::lerp(0.f, 0.800000012f, reflection_roughness), ::math::lerp(0.f, 0.800000012f, reflection_roughness) * ::math::lerp(0.f, 0.800000012f, reflection_roughness) + reflection_smooth * (1.f - ::math::lerp(0.f, 0.800000012f, reflection_roughness) * ::math::lerp(0.f, 0.800000012f, reflection_roughness)), ::base::file_texture(texture_2d("./textures/pcb_goldfinger_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, no_uv ? ::base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono), ::math::lerp(::math::lerp(0.f, 0.800000012f, reflection_roughness) * ::math::lerp(0.f, 0.800000012f, reflection_roughness), ::math::lerp(0.f, 0.800000012f, reflection_roughness) * ::math::lerp(0.f, 0.800000012f, reflection_roughness) + reflection_smooth * (1.f - ::math::lerp(0.f, 0.800000012f, reflection_roughness) * ::math::lerp(0.f, 0.800000012f, reflection_roughness)), ::base::file_texture(texture_2d("./textures/pcb_goldfinger_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, no_uv ? ::base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono) * ::math::lerp(::math::lerp(0.f, 0.800000012f, reflection_roughness) * ::math::lerp(0.f, 0.800000012f, reflection_roughness), ::math::lerp(0.f, 0.800000012f, reflection_roughness) * ::math::lerp(0.f, 0.800000012f, reflection_roughness) + reflection_smooth * (1.f - ::math::lerp(0.f, 0.800000012f, reflection_roughness) * ::math::lerp(0.f, 0.800000012f, reflection_roughness)), ::base::file_texture(texture_2d("./textures/pcb_goldfinger_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, no_uv ? ::base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono), color(1.f, 1.f, 1.f), ::state::texture_tangent_u(0), ::df::scatter_reflect), bsdf(), ::base::tangent_space_normal_texture(texture_2d("./textures/pcb_goldfinger_norm.jpg", ::tex::gamma_linear), ::math::lerp(0.f, 2.f, bump_strength), false, false, no_uv ? ::base::coordinate_projection(coordinate_system, uv_space_index, projection_type, float4x4(scale)) : vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 1.f, 0.f)), material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		material_surface tmp2 = material_surface(scattering: bsdf(), emission: material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		color tmp3 = color(1.f, 1.f, 1.f);
+		material_geometry tmp5(float3(0.f), 1.f, enable_round_corners ? ::state::rounded_corner_normal(radius, across_materials, 1.f) : ::state::normal());
+		
+	} in
+		material(
+			thin_walled: tmp0,
+			surface: tmp1,
+			backface: tmp2,
+			ior: tmp3,
+			geometry: tmp5);
+
+export material PCB_Goldfinger_Smooth(*)
+[[
+	::anno::display_name("PCB Goldfinger Smooth"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::key_words(string[]("conductiv", "metal", "gold", "finger", "pcb", "plate", "computer", "yellow", "shiny", "bumped", "metallic", "construction", "light", "warm", "reflective", "smooth")),
+	::anno::thumbnail("./.thumbs/PCB_Goldfinger.PCB_Goldfinger_Smooth.png"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab")
+]]
+= PCB_Goldfinger
+(
+	grazing_reflectivity: color(1.f, 1.f, 1.f),
+	reflection_roughness: .0f,
+	reflection_smooth: .8f,
+	bump_strength: .2f,
+	texture_translate: float2(0.0f),
+	texture_rotate: 0.0f,
+	texture_scale: float2(1.0f),
+	enable_round_corners: false,
+	radius: 1.5f,
+	across_materials: false,
+	no_uv: false,
+	projection_type: ::base::projection_planar,
+	scale: 1.f,
+	coordinate_system: ::base::texture_coordinate_object,
+	uv_space_index: 0
+);
+
+export material PCB_Goldfinger_Soft(*)
+[[
+	::anno::display_name("PCB Goldfinger Soft"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::key_words(string[]("conductiv", "metal", "gold", "finger", "pcb", "plate", "computer", "yellow", "shiny", "bumped", "metallic", "construction", "light", "warm", "reflective", "smoft")),
+	::anno::thumbnail("./.thumbs/PCB_Goldfinger.PCB_Goldfinger_Soft.png"),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Maik Rohland"),
+	::anno::contributor("Ruediger Raab")
+]]
+= PCB_Goldfinger
+(
+	grazing_reflectivity: color(1.f, 1.f, 1.f),
+	reflection_roughness: .5f,
+	reflection_smooth: .8f,
+	bump_strength: .5f,
+	texture_translate: float2(0.0f),
+	texture_rotate: 0.0f,
+	texture_scale: float2(1.0f),
+	enable_round_corners: false,
+	radius: 1.5f,
+	across_materials: false,
+	no_uv: false,
+	projection_type: ::base::projection_planar,
+	scale: 1.f,
+	coordinate_system: ::base::texture_coordinate_object,
+	uv_space_index: 0
+);

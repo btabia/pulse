@@ -1,0 +1,878 @@
+/******************************************************************************
+ *	        Copyright 2024 NVIDIA Corporation. All rights reserved.           *
+ ******************************************************************************
+ 
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our 
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL 
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA’s Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any 
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR 
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, 
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF 
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+
+mdl 1.5;
+
+import ::anno::*;
+import ::base::*;
+import ::df::*;
+import ::math::*;
+import ::state::*;
+import ::tex::*;
+import ::nvidia::core_definitions::blend_colors;
+import ::nvidia::core_definitions::dimension;
+
+
+const string COPYRIGHT = 
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+annotation preview_scale( float f);
+
+::base::texture_coordinate_info warped_coordinate(
+//	uniform texture_2d warp_texture,
+	float warp_value,
+	float amount,
+	float angle,
+	::base::texture_coordinate_info uvw = ::base::coordinate_source()
+)
+{
+	uvw.position = float3(uvw.position.x + amount * warp_value * ::math::sin(angle),
+							uvw.position.y + amount * warp_value * ::math::cos(angle),
+							uvw.position.z
+	);
+	return uvw;
+}
+
+
+::base::texture_coordinate_info transform_coordinate_2(
+	float4x4 transform										 
+		[[ ::anno::description("A transformation to be applied to the source coordinates. rotation_translation_scale() is a suggested means to compute the transformation matrix.") ]],
+	::base::texture_coordinate_info coordinate = ::base::texture_coordinate_info()
+		[[ ::anno::description("Coordinate, typically sourced from coordinate_source or coordinate_projection.") ]]
+) [[ 
+	::anno::description("Transform a texture coordinate by a matrix.") ,
+	::anno::noinline()
+  ]]
+{
+	// Version 2
+	float4 r_position = transform * float4(coordinate.position.x,coordinate.position.y,coordinate.position.z,1);
+	//Try aproximating it for the case that the rotation is only aroud z and assuming the texture layout is nice and z is ~constant.
+	//just pretend there is no other rotation happening
+	//get rid of scaling and translation. Then extract fields where sin and cos would be in a simple 2d transform around z.
+	float4 u = transform[0];
+	float3 ru = ::math::normalize(float3(u.x,u.y,u.z));
+	float cos =  ru.x; 
+	float sin =  -ru.y;
+	//TODO: at least also handle sign of z?
+	//TODO: handle tangent becoming 0 
+	
+	
+	return ::base::texture_coordinate_info(
+		float3(r_position.x,r_position.y,r_position.z),
+		::math::normalize(cos * coordinate.tangent_u - sin * coordinate.tangent_v),
+		::math::normalize(cos * coordinate.tangent_v + sin * coordinate.tangent_u));
+}
+
+
+::base::texture_coordinate_info vmat_transform(
+								float2 translation = float2(0.0, 0.0),
+								float rotation	 = 0.0,				// rotation in degrees
+								float2 scaling	 = float2(1.0, 1.0),
+								uniform ::base::texture_coordinate_system system = ::base::texture_coordinate_uvw,
+								uniform int uv_space	   = 0
+)
+{
+	float rotation_rad = (rotation * 3.1415926535897932384626433832f) / 180.f;
+	float4x4 scale =
+	float4x4(1.0 /scaling.x, 0.			 ,  0. ,	 0.,
+			 0.			, 1.0 /scaling.y ,  0. ,	 0.,
+			 0.			, 0.			 ,  1.0,	 0.,
+			 translation.x , translation.y  ,  0.0,	 1.);
+
+	float s = ::math::sin(rotation_rad);
+	float c = ::math::cos(rotation_rad);
+	float4x4 rotate =
+	float4x4(  c  ,  -s   , 0.0 , 0.0,
+			   s  ,   c   , 0.0 , 0.0,
+			   0.0,   0.0 , 1.0 , 0.0,
+			   0. ,   0.0 , 0.0 , 1.);
+	
+	return transform_coordinate_2(scale*rotate, ::base::coordinate_source(system, uv_space));
+}
+
+float uint2float(int x)
+{
+	return float(x & 0x7FFFFFFF) + (x < 0 ? 2147483648.0 : 0.0);
+}
+
+
+int lowbias32(int x)
+{
+	x ^= x >>> 16;
+	x *= 0x7feb352d;
+	x ^= x >>> 15;
+	x *= 0x846ca68b;
+	x ^= x >>> 16;
+	return x;
+}
+
+float2 rotate_around(float2 uv, float angle, float2 pt)
+{	
+	float sine   = ::math::sin(angle);
+	float cosine = ::math::cos(angle);
+	float2x2 rot = float2x2(cosine, -sine, sine, cosine);
+	uv -= pt;
+	uv = rot * uv  ;
+	return uv + pt;
+}
+
+float2 scale_around(float2 uv, float2 scale, float2 pt)
+{	
+	float2x2 rot = float2x2(scale.x, 0., 0., scale.y);
+	uv -= pt;
+	uv = rot * uv;
+	return uv + pt;
+}
+
+
+
+float scatter_grayscale(
+	uniform texture_2d pattern_texture = texture_2d(),
+	uniform texture_2d mask_texture = texture_2d(),
+	uniform texture_2d bluenoise_texture = texture_2d(),
+	
+	float pattern_size 				= 1.0f, // The size of the pattern
+	float pattern_brightness		= 1.0f,
+	float pattern_brightness_variation 	= 0.0,			// amount of color randomization
+	int compute_size 					= 1,	// bigger grid size is required when texture is scaled larger but is more expensive
+	float random_mask_threshold 		= 0.0f,	// higher values cause certain cells not to be rendered
+	bool use_true_random_masking		= false, // vs. using the blue noise texture that spaces the particles more venely apart from each other
+	
+	::base::texture_coordinate_info uvw = ::base::coordinate_source(), // UVW coordinates to be used to lay the bombing over
+	float2 texture_scale 			= float2(30.0f, 30.0f),	
+	float2 offset_randomization 	= float2(.5),	// amount of position randomization. Larger values will require "compute_size" to be
+													// increased, otherwise the texture will be clipped
+	float rotation					= 0.0,			// amount of global rotation
+	float rotation_randomization	= 0.5,			// amount of rotation randomization
+	float scale_randomization 		= 0.0,			// amount of scaling randomization
+	bool additive_blend				= false,		// when false, mode is "max", otherwise "add/sub", centered at 0.5
+	
+	// MASK
+	bool enable_grayscale_mask		= false,
+	float grayscale_mask_threshold	= 0.0,
+	int seed 						= 0
+)
+{
+	float result = 0.0;
+	float4 grayscale_mask_lookup = 0.0f;
+	float masking_value = 0.0;
+	compute_size = compute_size < 1 ? 1 : compute_size;
+	float2 uv = float2(uvw.position.x, uvw.position.y) * texture_scale;
+
+	for(float i = -compute_size; i <= compute_size; i++)
+		for(float j = -compute_size; j <= compute_size; j++)
+		{
+			float2 p = ::math::floor(uv + float2(i, j));
+			float2 f = ::math::frac(uv) - float2(i, j);
+			
+			//float4 rand_4f = rnd42(int2(p));	
+			int r1, r2, r3, r4, r5;
+			// get random values
+			r1 = lowbias32(lowbias32(seed) + int(p[0]) + lowbias32(int(p[1])));
+			r2 = lowbias32(r1);
+			r3 = lowbias32(r2);
+			r4 = lowbias32(r3);
+			r5 = lowbias32(r4);
+			
+			float rnd1, rnd2, rnd3, rnd4, rnd5;
+			rnd1 = uint2float(r1)/ 4294967296.f;
+			rnd2 = uint2float(r2)/ 4294967296.f;
+			rnd3 = uint2float(r3)/ 4294967296.f;
+			rnd4 = uint2float(r4)/ 4294967296.f;
+			rnd5 = uint2float(r5)/ 4294967296.f;
+			
+			f+= (float2(rnd1, rnd2) - float2(0.5f)) * offset_randomization;
+			
+			float2 rand_2f_remap = (float2(rnd3, rnd4) - float2( .5f)) * 2.0f; // center around - 1.0 - 1.0
+			f = rotate_around(f, (rotation + rand_2f_remap.x * rotation_randomization) * 3.1415, float2(0.5));
+			f = scale_around(f, float2(1.0 + rand_2f_remap.y * scale_randomization)/ pattern_size, float2(0.5));
+
+			int blue_noise_width = ::tex::width(bluenoise_texture);
+			int blue_noise_height = ::tex::height(bluenoise_texture);
+			
+			// switch between completely random mask and mask mrovided by blue noise texture
+			masking_value = use_true_random_masking ? rnd4 : 
+						::tex::texel_float4(bluenoise_texture, int2(int(::math::floor(p.x))%blue_noise_width, int(::math::floor(p.y))%blue_noise_height)).x;
+			
+			if (enable_grayscale_mask == true)
+			{
+				// compute exact center of cells for the masking before it is being offset. We are not computing the mask
+				// at the position where the element that is being scattered is ending up. That could be an alternative mode to be implemented. 
+				float2 cell_size = float2(1.0/texture_scale);
+				grayscale_mask_lookup = ::tex::lookup_float4(mask_texture, float2(cell_size/2 + cell_size * p));
+			}
+			bool mask_pass = (grayscale_mask_lookup.x > grayscale_mask_threshold) || enable_grayscale_mask == false;
+			
+			if(f.x >= 0.0 && f.x < 1.0 && f.y >= 0.0 && f.y < 1.0 && mask_pass && random_mask_threshold < masking_value)
+			{
+				float4 lookup = ::tex::lookup_float4(pattern_texture, float2(f), ::tex::wrap_repeat, ::tex::wrap_repeat, float2(0.0, 1.0), float2(0.0, 1.0));
+				// do blending of lookup
+				// if (blend_add_sub == true)
+				// {
+					// value = (lookup.x + lookup.y + lookup.z)/3 - 0.5;
+					// result = ::math::clamp(result + value * (1.0 - rand_4f.z * pattern_brightness_variation), 0.0f, 1.0f);
+				// }
+				// else
+					
+				if (additive_blend == true)
+					result = result + (lookup.x + lookup.y + lookup.z)/3 * (1.0 - rnd5 * pattern_brightness_variation)*pattern_brightness;
+				else
+					result =  ::math::max((lookup.x + lookup.y + lookup.z)/3 * (1.0 - rnd5 * pattern_brightness_variation)*pattern_brightness, result);
+			}
+		}
+
+	return result;
+}
+
+float scatter_atlas_grayscale(
+	uniform texture_2d pattern_atlas_texture = texture_2d(),
+	uniform texture_2d mask_texture = texture_2d(),
+	uniform texture_2d bluenoise_texture = texture_2d(),
+	
+	uniform int atlas_size			= 2,
+	int min_pattern					= 1,
+	int max_pattern					= 4,
+	float pattern_size 				= 1.0f, // The size of the pattern
+	float pattern_brightness		= 1.0f,
+	float pattern_brightness_variation 	= 0.0,			// amount of color randomization
+	int compute_size 					= 1,	// bigger grid size is required when texture is scaled larger but is more expensive
+	float random_mask_threshold 		= 0.0f,	// higher values cause certain cells not to be rendered
+	bool use_true_random_masking		= false, // vs. using the blue noise texture that spaces the particles more venely apart from each other
+	
+	::base::texture_coordinate_info uvw = ::base::coordinate_source(), // UVW coordinates to be used to lay the bombing over
+	float2 texture_scale 			= float2(30.0f, 30.0f),	
+	float2 offset_randomization 	= float2(.5),	// amount of position randomization. Larger values will require "compute_size" to be
+													// increased, otherwise the texture will be clipped
+	float rotation					= 0.0,			// amount of global rotation
+	float rotation_randomization	= 0.5,			// amount of rotation randomization
+	float scale_randomization 		= 0.0,			// amount of scaling randomization
+	bool additive_blend				= false,		// when false, mode is "max", otherwise "add/sub", centered at 0.5
+	
+	// MASK
+	bool enable_grayscale_mask		= false,
+	float grayscale_mask_threshold	= 0.0,
+	int seed 						= 0
+)
+{
+	float result = 0.0;
+	float4 grayscale_mask_lookup = 0.0f;
+	float masking_value = 0.0;
+	compute_size = compute_size < 1 ? 1 : compute_size;
+	float atlas_tile_size = 1.0f/atlas_size;	// dimension of a single atlas tile
+	float2 uv = float2(uvw.position.x, uvw.position.y) * texture_scale;
+	
+
+	for(float i = -compute_size; i <= compute_size; i++)
+		for(float j = -compute_size; j <= compute_size; j++)
+		{
+			float2 p = ::math::floor(uv + float2(i, j));
+			float2 f = ::math::frac(uv) - float2(i, j);
+			
+			//float4 rand_4f = rnd42(int2(p));	
+			int r1, r2, r3, r4, r5;
+			// get random values
+			r1 = lowbias32(lowbias32(seed) + int(p[0]) + lowbias32(int(p[1])));
+			r2 = lowbias32(r1);
+			r3 = lowbias32(r2);
+			r4 = lowbias32(r3);
+			r5 = lowbias32(r4);
+			
+			float rnd1, rnd2, rnd3, rnd4, rnd5;
+			rnd1 = uint2float(r1)/ 4294967296.f;
+			rnd2 = uint2float(r2)/ 4294967296.f;
+			rnd3 = uint2float(r3)/ 4294967296.f;
+			rnd4 = uint2float(r4)/ 4294967296.f;
+			rnd5 = uint2float(r5)/ 4294967296.f;
+			
+			f+= (float2(rnd1, rnd2) - float2(0.5f)) * offset_randomization;
+			
+			float2 rand_2f_remap = (float2(rnd3, rnd4) - float2( .5f)) * 2.0f; // center around - 1.0 - 1.0
+			float rot_angle = (rotation + rand_2f_remap.x * rotation_randomization) * 3.1415;
+			f = rotate_around(f, rot_angle, float2(0.5));
+			f = scale_around(f, float2(1.0 + rand_2f_remap.y * scale_randomization)/ pattern_size, float2(0.5));
+
+			int blue_noise_width = ::tex::width(bluenoise_texture);
+			int blue_noise_height = ::tex::height(bluenoise_texture);
+			
+			// switch between completely random mask and mask mrovided by blue noise texture
+			masking_value = use_true_random_masking ? rnd4 : 
+						::tex::texel_float4(bluenoise_texture, int2(int(::math::floor(p.x))%blue_noise_width, int(::math::floor(p.y))%blue_noise_height)).x;
+			
+			if (enable_grayscale_mask == true)
+			{
+				// compute exact center of cells for the masking before it is being offset. We are not computing the mask
+				// at the position where the element that is being scattered is ending up. That could be an alternative mode to be implemented. 
+				float2 cell_size = float2(1.0/texture_scale);
+				grayscale_mask_lookup = ::tex::lookup_float4(mask_texture, float2(cell_size/2 + cell_size * p));
+			}
+			bool mask_pass = (grayscale_mask_lookup.x > grayscale_mask_threshold) || enable_grayscale_mask == false;
+			
+			if(f.x >= 0.0 && f.x < 1.0 && f.y >= 0.0 && f.y < 1.0 && mask_pass && random_mask_threshold < masking_value)
+			{
+				// compute atlas tile from random number and derive tile coordinates from that
+
+				float atlas_tile = ::math::floor(::math::lerp(float(min_pattern), float(max_pattern+1), rnd5)); 
+				float div = (atlas_tile/atlas_size); 
+				float remainder =  div - ::math::floor(div);
+				
+				// Perform lookup in the range that was selected
+				float2 lookup_uv = float2(::math::lerp(::math::floor(div) * atlas_tile_size, ::math::floor(div) * atlas_tile_size + atlas_tile_size, f.x),
+										::math::lerp(remainder, remainder + atlas_tile_size, f.y));
+				
+				float4 lookup = ::tex::lookup_float4(pattern_atlas_texture, lookup_uv, ::tex::wrap_repeat, ::tex::wrap_repeat, float2(0.0, 1.0), float2(0.0, 1.0));
+
+				if (additive_blend == true)
+					result = result + (lookup.x + lookup.y + lookup.z)/3 * (1.0 - rnd1 * pattern_brightness_variation)*pattern_brightness;
+				else
+					result =  ::math::max((lookup.x + lookup.y + lookup.z)/3 * (1.0 - rnd1 * pattern_brightness_variation)*pattern_brightness, result);
+				
+			}
+		}
+
+	return result;
+}
+
+float remap_xy_to_0_1(float input, float x, float y)
+{
+	return (input - x)/(y - x);
+}
+
+float histogram_range(float input, float range = 1.0f, float position = 0.5f)
+{	
+	float low = ::math::clamp(1.0 - ::math::min(((1.0 - position) + range * 0.5), (1.0 - position) * 2), 0.0, 1.0);
+	float high = ::math::clamp(::math::min((position + range * 0.5 ), position * 2.0), 0.0, 1.0);
+	return ::math::lerp(low, high, input);
+}
+
+float histogram_scan(float input, float width, float position)
+{	
+	float low = ::math::clamp(1.0f - position * 2.0, 0.0f ,1.0f);
+	float high = ::math::clamp(position > 0.5f ? 1.0 : 2.0f - 2 * position, 0.0f, 1.0f);
+	//float center = (low + high)/2.0f);
+	float offset = ((high - low) / 2.0) * width;
+	low += offset;
+	high -= offset;
+	return ::math::clamp(
+				remap_xy_to_0_1(input,
+					low,
+					high),
+				0.0,
+				1.0);
+}
+
+float3 normalmap_normal(
+	uniform texture_2d texture,
+	float factor = 1.0,
+	::base::texture_coordinate_info uvw = ::base::texture_coordinate_info()
+)
+{
+	float3 lookup = (::tex::lookup_float3(texture, float2(uvw.position.x, uvw.position.y)) - float3(0.5)) * (factor * 2.0);
+	return ::math::normalize(uvw.tangent_u * lookup.x + uvw.tangent_v * lookup.y + ::state::normal() * (lookup.z + (1.0 - factor)));
+}
+
+// Returns the normal n in tangent space, given n is in internal space.
+float3 transform_internal_to_tangent(float3 n)
+[[ 
+	::anno::hidden() 
+]]
+{
+	return
+		n.x* float3(::state::texture_tangent_u(0).x,::state::texture_tangent_v(0).x,::state::normal().x)+
+		n.y* float3(::state::texture_tangent_u(0).y,::state::texture_tangent_v(0).y,::state::normal().y)+
+		n.z* float3(::state::texture_tangent_u(0).z,::state::texture_tangent_v(0).z,::state::normal().z);
+}
+
+// Returns the normal n in internal space, given n is in tangent space.
+float3 transform_tangent_to_internal(float3 n)
+[[ 
+	::anno::hidden() 
+]]
+{
+	return  ::state::texture_tangent_u(0) * n.x +
+			::state::texture_tangent_v(0) * n.y +
+			::state::normal() * n.z ;
+}
+
+// Returns a normal by adding a detail normal to a global normal.
+// If detail blending of two normal maps gives visual artifacts, check if texture_2d are loaded
+// correctly with ::tex::gamma_linear
+float3 add_detail_normal(float3 nd = ::state::normal(), float3 n = ::state::normal())
+{
+	// http://blog.selfshadow.com/publications/blending-in-detail/
+	float3 n_t = transform_internal_to_tangent(n);
+	float3 nd_t = transform_internal_to_tangent(nd);
+
+	n_t=n_t + float3(0.,0.,1.);
+	nd_t = nd_t *  float3(-1.,-1.,1.);
+	n = n_t*::math::dot(n_t, nd_t)/n_t.z - nd_t;
+	return ::math::normalize(transform_tangent_to_internal(n));
+}
+
+
+
+export material Fiberglass_Imperfections(
+	int seed = 14 [[
+		::anno::description("A random seed to randomize the imperfections."),
+		::anno::display_name("Random Seed"),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(0)
+	]],
+	color fiberglass_tint = color(0.812241f, 0.932277f, 0.957370f) [[
+		::anno::description("Applies a colored tint to the fibers."),
+		::anno::display_name("Fiberglass Tint"),
+		::anno::in_group("Appearance", "Diffuse"),
+		::anno::ui_order(1)
+	]],
+	float fibers_shininess = 1.f [[
+		::anno::description("Makes the fiber glass material duller or shinier. Default value is 0.5."),
+		::anno::display_name("Fibers Shininess"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(2)
+	]],
+	uniform float weaving_bump_strength = 0.75f [[
+		::anno::description("Determines the degree of bumpiness for the weaving."),
+		::anno::display_name("Weaving Bump Strength"),
+		::anno::in_group("Appearance", "Bump"),
+		::anno::soft_range(0.f, 1.f),
+		::anno::hard_range(0.f, 3.f),
+		::anno::ui_order(3)
+	]],
+	uniform float fibers_bump_strength = 1.f [[
+		::anno::description("Determines the degree of bumpiness of the fibers."),
+		::anno::display_name("Fibers Bump Strength"),
+		::anno::in_group("Appearance", "Bump"),
+		::anno::hard_range(0.f, 3.f),
+		::anno::soft_range(0.f, 1.f),
+		::anno::ui_order(4)
+	]],
+	float diffuse_brightness = 0.75f [[
+		::anno::description("The diffuse brightness of the fibers."),
+		::anno::display_name("Diffuse Brightness"),
+		::anno::in_group("Appearance", "Advanced"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(5)
+	]],
+	float specular_weight = 1.0f [[
+		::anno::description("The amount of glossiness variation for the vertical fiber glossiness."),
+		::anno::display_name("Specular Weight"),
+		::anno::in_group("Appearance", "Advanced"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(6)
+	]],
+	float diffuse_transmission_weight = 0.21f [[
+		::anno::description("The amount of light being able to scatter through the fibers."),
+		::anno::display_name("Diffuse Transmission Weight"),
+		::anno::in_group("Appearance", "Advanced"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(7)
+	]],
+	float bumps_and_dents_probability = 0.34f [[
+		::anno::description("The probability of generating bumps appearing on the material. Higher values will generate more bumps and dents."),
+		::anno::display_name("Bumps Probability"),
+		::anno::in_group("Bumps and Dents"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(12)
+	]],
+	float bumps_dents_density = 4.5f [[
+		::anno::description("The density of the bumps and dents."),
+		::anno::display_name("Bumps Density"),
+		::anno::in_group("Bumps and Dents"),
+		::anno::soft_range(0.f, 8.f),
+		::anno::enable_if("bumps_and_dents_probability > 0.0"),
+		::anno::ui_order(13)
+	]],
+	float bumps_kernel_size = 1.f [[
+		::anno::description("The area that the bumped imperfection is covering."),
+		::anno::display_name("Bumped Kernel Size"),
+		::anno::in_group("Bumps and Dents"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::enable_if("bumps_and_dents_probability > 0.0"),
+		::anno::ui_order(14)
+	]],
+	float bumps_waves_size = 0.7f [[
+		::anno::description("The dimension of the waves that bump and dent the surface."),
+		::anno::display_name("Bumps Wave Size"),
+		::anno::in_group("Bumps and Dents"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::enable_if("bumps_and_dents_probability > 0.0"),
+		::anno::ui_order(15)
+	]],
+	float bumps_dents_size_variation = 0.9f [[
+		::anno::description("Size variation of the bump surface imperfection."),
+		::anno::display_name("Bumps Size Variation"),
+		::anno::in_group("Bumps and Dents"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::enable_if("bumps_and_dents_probability > 0.0"),
+		::anno::ui_order(16)
+	]],
+	float bumps_dents_intensity = 1.f [[
+		::anno::description("Overall intensity of the bumps."),
+		::anno::display_name("Bumps Overall Intensity"),
+		::anno::in_group("Bumps and Dents"),
+		::anno::hard_range(0.f, 4.f),
+		::anno::enable_if("bumps_and_dents_probability > 0.0"),
+		::anno::ui_order(17)
+	]],
+	float bumps_dents_intensity_variation = 1.0f [[
+		::anno::description("The amount of variation that is applied to the intensitz of the bumps and dents."),
+		::anno::display_name("Bumps Intensity Variation"),
+		::anno::in_group("Bumps and Dents"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::enable_if("bumps_and_dents_probability > 0.0"),
+		::anno::ui_order(18)
+	]],
+	float deformation_probability = 0.5f [[
+		::anno::description("The probability of fabric deformation appearing on the material. Higher values will generate more deformations."),
+		::anno::display_name("Deformations Probability"),
+		::anno::in_group("Deformations"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(19)
+	]],
+	float deformations_density = 5.f [[
+		::anno::description("The density of the deformations."),
+		::anno::display_name("Deformations Density"),
+		::anno::in_group("Deformations"),
+		::anno::soft_range(0.f, 8.f),
+		::anno::enable_if("deformation_probability > 0.0"),
+		::anno::ui_order(20)
+	]],
+	float deformations_size = 1.f [[
+		::anno::description("The area that the fabric deformationis covering."),
+		::anno::display_name("Deformations Kernel  Size"),
+		::anno::in_group("Deformations"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::enable_if("deformation_probability > 0.0"),
+		::anno::ui_order(21)
+	]],
+	float deformations_size_variation = 0.25f [[
+		::anno::description("The amount of size variation of the areas where fabric deformations appear."),
+		::anno::display_name("Deformations Size Variation"),
+		::anno::in_group("Deformations"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::enable_if("deformation_probability > 0.0"),
+		::anno::ui_order(22)
+	]],
+	float deformation_intensity = 0.31f [[
+		::anno::description("The amount of deformation."),
+		::anno::display_name("Deformations Intensity"),
+		::anno::in_group("Deformations"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::enable_if("deformation_probability > 0.0"),
+		::anno::ui_order(23)
+	]],
+	float deformation_intensity_variation = 1.f [[
+		::anno::description("The amount of random variation to areas where surface deformation appears."),
+		::anno::display_name("Deformations Intensity Variation"),
+		::anno::in_group("Deformations"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::enable_if("deformation_probability > 0.0"),
+		::anno::ui_order(24)
+	]],
+	float tearing_probability = 0.13f [[
+		::anno::description("The probability tearing to on the material. Higher values will generate more tearings."),
+		::anno::display_name("Tearings Probability"),
+		::anno::in_group("Tearings"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(25)
+	]],
+	float tearings_density = 3.15f [[
+		::anno::description("The density of tearings appearing on the material."),
+		::anno::display_name("Tearings Density"),
+		::anno::in_group("Tearings"),
+		::anno::soft_range(0.f, 8.f),
+		::anno::enable_if("tearing_probability > 0.0"),
+		::anno::ui_order(26)
+	]],
+	float tearings_size = 1.f [[
+		::anno::description("The area that a tearing is covering."),
+		::anno::display_name("Tearings Kernel Size"),
+		::anno::in_group("Tearings"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::enable_if("tearing_probability > 0.0"),
+		::anno::ui_order(27)
+	]],
+	float tearing_size_variation = 0.36f [[
+		::anno::description("Randomizes the size of the tearings."),
+		::anno::display_name("Tearings Size Variation"),
+		::anno::in_group("Tearings"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::enable_if("tearing_probability > 0.0"),
+		::anno::ui_order(28)
+	]],
+	float tearings_rotation = 0.f [[
+		::anno::description("The overal rotation of the tearings."),
+		::anno::display_name("Tearings Rotation"),
+		::anno::in_group("Tearings"),
+		::anno::soft_range(0.f, 3.f),
+		::anno::enable_if("tearing_probability > 0.0"),
+		::anno::ui_order(29)
+	]],
+	float tearings_rotation_randomization = 0.f [[
+		::anno::description("The amount of random rotation of a tearing."),
+		::anno::display_name("Tearings Rotation Variation"),
+		::anno::in_group("Tearings"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::enable_if("tearing_probability > 0.0"),
+		::anno::ui_order(30)
+	]],
+	float2 texture_translate = float2(0.f) [[
+		::anno::description("Controls the position of the texture."),
+		::anno::display_name("Texture Translate"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(31)
+	]],
+	float texture_rotate = 0.f [[
+		::anno::description("Rotates angle of the texture in degrees."),
+		::anno::display_name("Texture Rotate"),
+		::anno::in_group("Transform"),
+		::anno::soft_range(0.f, 360.f),
+		::anno::ui_order(32)
+	]],
+	float2 texture_scale = float2(1.0f) [[
+		::anno::description("Larger numbers increase the size."),
+		::anno::display_name("Texture Scale"),
+		::anno::in_group("Transform"),
+		::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+		::preview_scale(3.5f),
+		::anno::ui_order(33)
+	]],
+	uniform int uv_space_index = 0 [[
+		::anno::description("Use selected UV space for the material."),
+		::anno::display_name("UV Space Index"),
+		::anno::in_group("Advanced"),
+		::anno::ui_order(34)
+	]])
+[[
+	::anno::description("A fiberglass material with adjustable imperfections such as bumps, warps and tears."),
+	::anno::display_name("Fiberglass with Imperfections"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Fiberglass_Imperfections.Fiberglass_Imperfections.png"),
+	::anno::key_words(string[]("fiber", "fiberglass", "artificial", "design", "fabric", "mesh", "woven", "synthetic", "imperfection", "white")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]]
+ = 
+    let {
+		float2 texture_rescale = texture_scale * 0.1f;
+		
+		texture_2d blue_noise_tex = texture_2d("./textures/fiber_blue_noise_placement_512x512.png", ::tex::gamma_linear);
+		texture_2d rough_ao_mask_tex = texture_2d("./textures/fiber_multi_R_rough_G_ao_B_mask.jpg", ::tex::gamma_linear);
+		texture_2d warp_direction_noise_tex = texture_2d("./textures/fiber_warp_direction_noise.jpg", ::tex::gamma_linear);
+		texture_2d warps_tex = texture_2d("./textures/fiberglass_warps.jpg", ::tex::gamma_linear);
+		texture_2d bump_tex = texture_2d("./textures/fiber_bump.jpg", ::tex::gamma_linear);
+		texture_2d tears_tex = texture_2d("./textures/fiber_tears.png", ::tex::gamma_linear);
+		texture_2d fiber_norm_tex = texture_2d("./textures/fiber_norm.jpg", ::tex::gamma_linear);
+		texture_2d waves_norm_tex = texture_2d("./textures/fiber_waves_norm.jpg", ::tex::gamma_linear);
+		texture_2d kernel_tex = texture_2d("./textures/fiber_kernel.jpg", ::tex::gamma_linear);
+		
+        bool tmp0 = false;
+        material_surface tmp1(::df::weighted_layer(diffuse_transmission_weight, ::df::diffuse_transmission_bsdf(nvidia::core_definitions::blend_colors(color(histogram_range(float3(::base::file_texture(rough_ao_mask_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, warped_coordinate(scatter_atlas_grayscale(warps_tex, texture_2d(), blue_noise_tex, 2, 0, 4, deformations_size * 2.f, deformation_intensity, deformation_intensity_variation, 1, 1.f - deformation_probability * 0.100000001f, true, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(deformations_density), float2(1.f), 0.f, 0.25f, deformations_size_variation * 0.600000024f, false, false, 0.f, seed + 11), 0.099999994f, ::base::file_texture(warp_direction_noise_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono * 3.1415f, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 1.f, 0.810000002f)), fiberglass_tint, ::base::color_layer_multiply, 1.f).tint, ""), ::df::custom_curve_layer(specular_weight, 1.f, 5.f, histogram_scan(float3(::base::file_texture(rough_ao_mask_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, warped_coordinate(scatter_atlas_grayscale(warps_tex, texture_2d(), blue_noise_tex, 2, 0, 4, deformations_size * 2.f, deformation_intensity, deformation_intensity_variation, 1, 1.f - deformation_probability * 0.100000001f, true, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(deformations_density), float2(1.f), 0.f, 0.25f, deformations_size_variation * 0.600000024f, false, false, 0.f, seed + 11), 0.099999994f, ::base::file_texture(warp_direction_noise_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono * 3.1415f, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[1], 0.f, 0.469999999f), ::df::microfacet_ggx_smith_bsdf(::math::max(::math::smoothstep(0.790000021f, 0.791000009f, float3(::base::file_texture(rough_ao_mask_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, warped_coordinate(scatter_atlas_grayscale(warps_tex, texture_2d(), blue_noise_tex, 2, 0, 4, deformations_size * 2.f, deformation_intensity, deformation_intensity_variation, 1, 1.f - deformation_probability * 0.100000001f, true, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(deformations_density), float2(1.f), 0.f, 0.25f, deformations_size_variation * 0.600000024f, false, false, 0.f, seed + 11), 0.099999994f, ::base::file_texture(warp_direction_noise_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono * 3.1415f, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2]) * histogram_range(float3(::base::file_texture(rough_ao_mask_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, warped_coordinate(scatter_atlas_grayscale(warps_tex, texture_2d(), blue_noise_tex, 2, 0, 4, deformations_size * 2.f, deformation_intensity, deformation_intensity_variation, 1, 1.f - deformation_probability * 0.100000001f, true, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(deformations_density), float2(1.f), 0.f, 0.25f, deformations_size_variation * 0.600000024f, false, false, 0.f, seed + 11), 0.099999994f, ::base::file_texture(warp_direction_noise_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono * 3.1415f, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 1.f, ::math::lerp(0.389999986f, 0.0799999982f, fibers_shininess)), histogram_range(float3(::base::file_texture(rough_ao_mask_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, warped_coordinate(scatter_atlas_grayscale(warps_tex, texture_2d(), blue_noise_tex, 2, 0, 4, deformations_size * 2.f, deformation_intensity, deformation_intensity_variation, 1, 1.f - deformation_probability * 0.100000001f, true, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(deformations_density), float2(1.f), 0.f, 0.25f, deformations_size_variation * 0.600000024f, false, false, 0.f, seed + 11), 0.099999994f, ::base::file_texture(warp_direction_noise_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono * 3.1415f, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 1.f, ::math::lerp(0.800000012f, 0.5f, fibers_shininess)) * ::math::min(1.f - ::math::smoothstep(0.50999999f, 0.539999962f, float3(::base::file_texture(rough_ao_mask_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, warped_coordinate(scatter_atlas_grayscale(warps_tex, texture_2d(), blue_noise_tex, 2, 0, 4, deformations_size * 2.f, deformation_intensity, deformation_intensity_variation, 1, 1.f - deformation_probability * 0.100000001f, true, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(deformations_density), float2(1.f), 0.f, 0.25f, deformations_size_variation * 0.600000024f, false, false, 0.f, seed + 11), 0.099999994f, ::base::file_texture(warp_direction_noise_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono * 3.1415f, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2]), ::math::smoothstep(0.340000004f, 0.389999986f, float3(::base::file_texture(rough_ao_mask_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, warped_coordinate(scatter_atlas_grayscale(warps_tex, texture_2d(), blue_noise_tex, 2, 0, 4, deformations_size * 2.f, deformation_intensity, deformation_intensity_variation, 1, 1.f - deformation_probability * 0.100000001f, true, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(deformations_density), float2(1.f), 0.f, 0.25f, deformations_size_variation * 0.600000024f, false, false, 0.f, seed + 11), 0.099999994f, ::base::file_texture(warp_direction_noise_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono * 3.1415f, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2]))), ::math::max(::math::smoothstep(0.790000021f, 0.791000009f, float3(::base::file_texture(rough_ao_mask_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, warped_coordinate(scatter_atlas_grayscale(warps_tex, texture_2d(), blue_noise_tex, 2, 0, 4, deformations_size * 2.f, deformation_intensity, deformation_intensity_variation, 1, 1.f - deformation_probability * 0.100000001f, true, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(deformations_density), float2(1.f), 0.f, 0.25f, deformations_size_variation * 0.600000024f, false, false, 0.f, seed + 11), 0.099999994f, ::base::file_texture(warp_direction_noise_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono * 3.1415f, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2]) * histogram_range(float3(::base::file_texture(rough_ao_mask_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, warped_coordinate(scatter_atlas_grayscale(warps_tex, texture_2d(), blue_noise_tex, 2, 0, 4, deformations_size * 2.f, deformation_intensity, deformation_intensity_variation, 1, 1.f - deformation_probability * 0.100000001f, true, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(deformations_density), float2(1.f), 0.f, 0.25f, deformations_size_variation * 0.600000024f, false, false, 0.f, seed + 11), 0.099999994f, ::base::file_texture(warp_direction_noise_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono * 3.1415f, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 1.f, ::math::lerp(0.800000012f, 0.5f, fibers_shininess)), histogram_range(float3(::base::file_texture(rough_ao_mask_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, warped_coordinate(scatter_atlas_grayscale(warps_tex, texture_2d(), blue_noise_tex, 2, 0, 4, deformations_size * 2.f, deformation_intensity, deformation_intensity_variation, 1, 1.f - deformation_probability * 0.100000001f, true, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(deformations_density), float2(1.f), 0.f, 0.25f, deformations_size_variation * 0.600000024f, false, false, 0.f, seed + 11), 0.099999994f, ::base::file_texture(warp_direction_noise_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono * 3.1415f, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 1.f, ::math::lerp(0.389999986f, 0.0799999982f, fibers_shininess)) * ::math::min(1.f - ::math::smoothstep(0.50999999f, 0.539999962f, float3(::base::file_texture(rough_ao_mask_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, warped_coordinate(scatter_atlas_grayscale(warps_tex, texture_2d(), blue_noise_tex, 2, 0, 4, deformations_size * 2.f, deformation_intensity, deformation_intensity_variation, 1, 1.f - deformation_probability * 0.100000001f, true, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(deformations_density), float2(1.f), 0.f, 0.25f, deformations_size_variation * 0.600000024f, false, false, 0.f, seed + 11), 0.099999994f, ::base::file_texture(warp_direction_noise_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono * 3.1415f, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2]), ::math::smoothstep(0.340000004f, 0.389999986f, float3(::base::file_texture(rough_ao_mask_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, warped_coordinate(scatter_atlas_grayscale(warps_tex, texture_2d(), blue_noise_tex, 2, 0, 4, deformations_size * 2.f, deformation_intensity, deformation_intensity_variation, 1, 1.f - deformation_probability * 0.100000001f, true, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(deformations_density), float2(1.f), 0.f, 0.25f, deformations_size_variation * 0.600000024f, false, false, 0.f, seed + 11), 0.099999994f, ::base::file_texture(warp_direction_noise_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono * 3.1415f, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2]))), color(1.f, 1.f, 1.f), ::state::texture_tangent_u(0), ::df::scatter_reflect, ""), ::df::diffuse_reflection_bsdf(nvidia::core_definitions::blend_colors(color(histogram_range(float3(::base::file_texture(rough_ao_mask_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, warped_coordinate(scatter_atlas_grayscale(warps_tex, texture_2d(), blue_noise_tex, 2, 0, 4, deformations_size * 2.f, deformation_intensity, deformation_intensity_variation, 1, 1.f - deformation_probability * 0.100000001f, true, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(deformations_density), float2(1.f), 0.f, 0.25f, deformations_size_variation * 0.600000024f, false, false, 0.f, seed + 11), 0.099999994f, ::base::file_texture(warp_direction_noise_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono * 3.1415f, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0], 1.f, diffuse_brightness)), fiberglass_tint, ::base::color_layer_multiply, 1.f).tint, 0.f, ""), ::state::normal()), ::state::normal()), material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+        material_surface tmp2 = material_surface(scattering: bsdf(), emission: material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+        color tmp3 = color(1.f, 1.f, 1.f);
+        material_volume tmp4 = material_volume(scattering: vdf(), absorption_coefficient: color(0.f, 0.f, 0.f), scattering_coefficient: color(0.f, 0.f, 0.f));
+        material_geometry tmp5(float3(0.f), ::math::min(::math::smoothstep(0.0299999993f, 0.0309999995f, float3(::base::file_texture(rough_ao_mask_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, warped_coordinate(scatter_atlas_grayscale(warps_tex, texture_2d(), blue_noise_tex, 2, 0, 4, deformations_size * 2.f, deformation_intensity, deformation_intensity_variation, 1, 1.f - deformation_probability * 0.100000001f, true, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(deformations_density), float2(1.f), 0.f, 0.25f, deformations_size_variation * 0.600000024f, false, false, 0.f, seed + 11), 0.099999994f, ::base::file_texture(warp_direction_noise_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono * 3.1415f, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2]), 1.f - scatter_atlas_grayscale(tears_tex, texture_2d(), blue_noise_tex, 2, 0, 4, tearings_size * 2.f, 1.f, 0.f, 1, 1.f - tearing_probability * 0.100000001f, true, warped_coordinate(scatter_atlas_grayscale(warps_tex, texture_2d(), blue_noise_tex, 2, 0, 4, deformations_size * 2.f, deformation_intensity, deformation_intensity_variation, 1, 1.f - deformation_probability * 0.100000001f, true, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(deformations_density), float2(1.f), 0.f, 0.25f, deformations_size_variation * 0.600000024f, false, false, 0.f, seed + 11), 0.099999994f, ::base::file_texture(warp_direction_noise_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono * 3.1415f, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index)), float2(tearings_density), float2(1.f), tearings_rotation, tearings_rotation_randomization, tearing_size_variation * 0.600000024f, false, false, 0.f, seed + 10)), add_detail_normal(::base::file_bump_texture(bump_tex, fibers_bump_strength, ::base::mono_average, warped_coordinate(scatter_atlas_grayscale(warps_tex, texture_2d(), blue_noise_tex, 2, 0, 4, deformations_size * 2.f, deformation_intensity, deformation_intensity_variation, 1, 1.f - deformation_probability * 0.100000001f, true, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(deformations_density), float2(1.f), 0.f, 0.25f, deformations_size_variation * 0.600000024f, false, false, 0.f, seed + 11), 0.099999994f, ::base::file_texture(warp_direction_noise_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono * 3.1415f, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, ::state::normal(), false), add_detail_normal(::base::tangent_space_normal_texture(fiber_norm_tex, weaving_bump_strength, false, false, warped_coordinate(scatter_atlas_grayscale(warps_tex, texture_2d(), blue_noise_tex, 2, 0, 4, deformations_size * 2.f, deformation_intensity, deformation_intensity_variation, 1, 1.f - deformation_probability * 0.100000001f, true, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(deformations_density), float2(1.f), 0.f, 0.25f, deformations_size_variation * 0.600000024f, false, false, 0.f, seed + 11), 0.099999994f, ::base::file_texture(warp_direction_noise_tex, color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).mono * 3.1415f, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 1.f, 0.f), normalmap_normal(waves_norm_tex, scatter_grayscale(kernel_tex, texture_2d(), blue_noise_tex, bumps_kernel_size * 3.f, 1.f, bumps_dents_intensity_variation, 3, 1.f - bumps_and_dents_probability * 0.200000003f, true, vmat_transform(texture_translate, texture_rotate, texture_rescale, ::base::texture_coordinate_uvw, uv_space_index), float2(bumps_dents_density), float2(1.f, 0.98999995f), 0.f, 1.f, bumps_dents_size_variation * 0.600000024f, false, false, 0.f, seed) * bumps_dents_intensity, vmat_transform(texture_translate, texture_rotate, texture_rescale * (bumps_waves_size * 3.f + 0.25f), ::base::texture_coordinate_uvw, uv_space_index)))));
+        hair_bsdf tmp6 = hair_bsdf();
+    } in
+        material(
+            thin_walled: tmp0,
+            surface: tmp1,
+            backface: tmp2,
+            ior: tmp3,
+            volume: tmp4,
+            geometry: tmp5,
+            hair: tmp6);
+
+
+
+export material Fiberglass_Bumpy_Imperfections(*)
+[[
+	::anno::description("A fiberglass material with adjustable imperfections such as bumps, warps and tears."),
+	::anno::display_name("Fiberglass with Bumpy Imperfections"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Fiberglass_Imperfections.Fiberglass_Bumpy_Imperfections.png"),
+	::anno::key_words(string[]("fiber", "fiberglass", "artificial", "design", "fabric", "mesh", "woven", "synthetic", "imperfection", "bumped", "bumpy", "white")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Fiberglass_Imperfections(
+	seed:								14,
+	fibers_shininess:					0.5f,
+	fiberglass_tint:					color(0.812241f, 0.932277f, 0.957370f),
+	weaving_bump_strength:				0.75f,
+	fibers_bump_strength:				1.0f,
+	specular_weight:					1.0f,
+	diffuse_brightness:					0.75f,
+	diffuse_transmission_weight:		0.21f,
+	
+	bumps_and_dents_probability:		0.95f,
+	bumps_dents_density:				5.5f,
+	bumps_kernel_size:					1.0f,
+	bumps_waves_size:					0.7f,
+	bumps_dents_size_variation:			0.9f,
+	bumps_dents_intensity:				1.0f,
+	bumps_dents_intensity_variation:	1.0f,
+	
+	deformation_probability:			0.0f,
+	deformations_density:				5.0f,
+	deformations_size:					1.0f,
+	deformations_size_variation:		0.25f,
+	deformation_intensity:				0.31f,
+	deformation_intensity_variation:	1.0f,
+	
+	tearing_probability:				0.0f,
+	tearings_density:					2.8f,
+	tearings_size:						1.0f,
+	tearing_size_variation:				0.36,
+	tearings_rotation:					0.0f,
+	tearings_rotation_randomization:	0.0f,
+	
+	texture_translate:					float2(0.0f),
+	texture_rotate:						0.0f,
+	texture_scale:						float2(1.0f),
+	uv_space_index:						0
+);
+
+
+
+export material Fiberglass_Torn_Imperfections(*)
+[[
+	::anno::description("A fiberglass material with adjustable imperfections such as bumps, warps and tears."),
+	::anno::display_name("Fiberglass with Torn Imperfections"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Fiberglass_Imperfections.Fiberglass_Torn_Imperfections.png"),
+	::anno::key_words(string[]("fiber", "fiberglass", "artificial", "design", "fabric", "mesh", "woven", "synthetic", "imperfection", "torn", "white")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Fiberglass_Imperfections(
+	seed:								14,
+	fibers_shininess:					0.5f,
+	fiberglass_tint:					color(0.812241f, 0.932277f, 0.957370f),
+	weaving_bump_strength:				0.75f,
+	fibers_bump_strength:				1.0f,
+	specular_weight:					1.0f,
+	diffuse_brightness:					0.75f,
+	diffuse_transmission_weight:		0.21f,
+	
+	bumps_and_dents_probability:		0.0f,
+	bumps_dents_density:				4.5f,
+	bumps_kernel_size:					1.0f,
+	bumps_waves_size:					0.7f,
+	bumps_dents_size_variation:			0.9f,
+	bumps_dents_intensity:				1.0f,
+	bumps_dents_intensity_variation:	1.0f,
+	
+	deformation_probability:			0.0f,
+	deformations_density:				5.0f,
+	deformations_size:					1.0f,
+	deformations_size_variation:		0.25f,
+	deformation_intensity:				0.31f,
+	deformation_intensity_variation:	1.0f,
+	
+	tearing_probability:				0.47f,
+	tearings_density:					3.15f,
+	tearings_size:						1.0f,
+	tearing_size_variation:				0.36,
+	tearings_rotation:					0.0f,
+	tearings_rotation_randomization:	0.0f,
+	
+	texture_translate:					float2(0.0f),
+	texture_rotate:						0.0f,
+	texture_scale:						float2(1.0f),
+	uv_space_index:						0
+);
+
+
+
+export material Fiberglass_Warped_Imperfections(*)
+[[
+	::anno::description("A fiberglass material with adjustable imperfections such as bumps, warps and tears."),
+	::anno::display_name("Fiberglass with Warped Imperfections"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Fiberglass_Imperfections.Fiberglass_Warped_Imperfections.png"),
+	::anno::key_words(string[]("fiber", "fiberglass", "artificial", "design", "fabric", "mesh", "woven", "synthetic", "imperfection", "warped", "white")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Fiberglass_Imperfections(
+	seed:								14,
+	fibers_shininess:					0.5f,
+	fiberglass_tint:					color(0.812241f, 0.932277f, 0.957370f),
+	weaving_bump_strength:				0.75f,
+	fibers_bump_strength:				1.0f,
+	specular_weight:					1.0f,
+	diffuse_brightness:					0.75f,
+	diffuse_transmission_weight:		0.21f,
+	
+	bumps_and_dents_probability:		0.0f,
+	bumps_dents_density:				4.5f,
+	bumps_kernel_size:					1.0f,
+	bumps_waves_size:					0.7f,
+	bumps_dents_size_variation:			0.9f,
+	bumps_dents_intensity:				1.0f,
+	bumps_dents_intensity_variation:	1.0f,
+	
+	deformation_probability:			0.84f,
+	deformations_density:				4.89f,
+	deformations_size:					1.0f,
+	deformations_size_variation:		0.25f,
+	deformation_intensity:				0.31f,
+	deformation_intensity_variation:	1.0f,
+	
+	tearing_probability:				0.47f,
+	tearings_density:					3.15f,
+	tearings_size:						1.0f,
+	tearing_size_variation:				0.36,
+	tearings_rotation:					0.0f,
+	tearings_rotation_randomization:	0.0f,
+	
+	texture_translate:					float2(0.0f),
+	texture_rotate:						0.0f,
+	texture_scale:						float2(1.0f),
+	uv_space_index:						0
+);

@@ -1,0 +1,441 @@
+/******************************************************************************
+ *	 Copyright 2024 NVIDIA Corporation. All rights reserved.	 *
+ ******************************************************************************
+ 
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our 
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL 
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA's Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any 
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR 
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, 
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF 
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+
+mdl 1.6;
+
+import ::anno::*;
+import ::base::*;
+import ::df::*;
+import ::math::*;
+import ::state::*;
+import ::tex::*;
+import ::nvidia::core_definitions::blend_colors;
+import ::nvidia::core_definitions::dimension;
+
+
+const string COPYRIGHT = 
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+const string DESCRIPTION = "A hammered brass material";
+
+::base::texture_coordinate_info vmat_transform(
+								uniform float2 translation = float2(0.0, 0.0),
+								uniform float rotation	 = 0.0,
+								uniform float2 scaling	 = float2(1.0, 1.0),
+								uniform ::base::texture_coordinate_system system = ::base::texture_coordinate_uvw,
+								uniform int uv_space	   = 0
+)
+{
+	float4x4 scale =
+	float4x4(1.0 /scaling.x, 0.			 ,  0. ,	 0.,
+			 0.			, 1.0 /scaling.y ,  0. ,	 0.,
+			 0.			, 0.			 ,  1.0,	 0.,
+			 translation.x , translation.y  ,  0.0,	 1.);
+
+	float s = ::math::sin(rotation);
+	float c = ::math::cos(rotation);
+	float4x4 rotate =
+	float4x4(  c  ,  -s   , 0.0 , 0.0,
+			   s  ,   c   , 0.0 , 0.0,
+			   0.0,   0.0 , 1.0 , 0.0,
+			   0. ,   0.0 , 0.0 , 1.);
+	
+	return ::base::transform_coordinate(scale*rotate, ::base::coordinate_source(system, uv_space));
+}
+
+
+
+float histogram_range(float input, float range, float position)
+{	
+	float low = ::math::clamp(1.0 - ::math::min(((1.0 - position) + range * 0.5), (1.0 - position) * 2), 0.0, 1.0);
+	float high = ::math::clamp(::math::min((position + range * 0.5 ), position * 2.0), 0.0, 1.0);
+	return ::math::lerp(low, high, input);
+}
+
+
+
+float3 normalmap_normal(
+	uniform texture_2d texture,
+	float factor = 1.0,
+	::base::texture_coordinate_info uvw = ::base::texture_coordinate_info()
+)
+{
+	float3 lookup = (::tex::lookup_float3(texture, float2(uvw.position.x, uvw.position.y)) - float3(0.5)) * (factor * 2.0);
+	return ::math::normalize(uvw.tangent_u * lookup.x + uvw.tangent_v * lookup.y + state::normal() * (lookup.z + (1.0 - factor)));
+}
+
+color gradient_lookup_smooth(uniform texture_2d gradient_texture, float position, float gradient_select = 0)
+{
+	// Pixel centers lie in the middle. To properly access the pixel centers of the gradients, apply an offset
+	float2 texel_coord = float2(position, gradient_select + (0.5f / ::tex::height(gradient_texture)));
+	return color(::tex::lookup_float3(gradient_texture, texel_coord));
+}
+
+
+export material Brass_Hammered(
+	float brass_type_select = 0.f [[
+		::anno::description("Bends between the Brass types. 0 is yellow brass, 0.33 gold brass and 0.66 red brass. Going from 0.66 to 1.0 wraps back to yellow brass."),
+		::anno::display_name("Brass Type Blend"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(0)
+	]],
+	float cavities_darkening = 1.f [[
+		::anno::description("Darkens the areas where cavities appear."),
+		::anno::display_name("Cavities Darkening"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(1)
+	]],
+	float roughness = 0.f [[
+		::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+		::anno::display_name("Roughness"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(2)
+	]],
+	float bump_strength = 0.99f [[
+		::anno::description("Specifies the strength of the bump."),
+		::anno::display_name("Bump Strength"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(3)
+	]],
+	uniform float2 texture_translate = float2(0.f) [[
+		::anno::description("Controls the position of the texture."),
+		::anno::display_name("Texture Translate"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(4)
+	]],
+	uniform float texture_rotate = 0.f [[
+		::anno::description("Rotates angle of the texture in degrees."),
+		::anno::display_name("Texture Rotate"),
+		::anno::in_group("Transform"),
+		::anno::soft_range(0.f, 360.f),
+		::anno::ui_order(5)
+	]],
+	uniform float2 texture_scale = float2(1.f) [[
+		::anno::description("Larger numbers increase the size."),
+		::anno::display_name("Texture Scale"),
+		::anno::in_group("Transform"),
+		::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+		::anno::ui_order(6)
+	]],
+	uniform bool roundcorners_enable = false [[
+		::anno::description("Enables the round corner effect. Comes at a slight performance cost as additional raytracing calls are required to evaluate the round corner effect."),
+		::anno::display_name("Enable Round Corners"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(7)
+	]],
+	uniform float roundcorners_radius_mm = 1.0f [[
+		::anno::description("Radius of the rounded corners in millimeters."),
+		::anno::display_name("Round Corner Radius (mm)"),
+		::anno::in_group("Round Corners"),
+		::anno::soft_range(0.f, 10.f),
+		::anno::ui_order(8)
+	]],
+	uniform bool roundcorners_across_materials = false [[
+		::anno::description("Applies the round corner effect across different materials when enabled."),
+		::anno::display_name("Across Materials"),
+		::anno::in_group("Round Corners"),
+		::anno::ui_order(9)
+	]],
+	uniform int uv_space_index = 0 [[
+		::anno::description("Uses selected UV space for material."),
+		::anno::display_name("UV Space Index"),
+		::anno::in_group("Advanced"),
+		::anno::hard_range(0, 10),
+		::anno::ui_order(10)
+	]])
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Hammered Yellow - Hammered Darkened"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Hammered.Brass_Hammered.png"),
+	// scratched, old, stained, crumpled, handled, worn, creative, smudged, bumped, matte, shiny
+	::anno::key_words(string[]("metal", "brass", "reflective", "shiny", "hammered", "stained", "bumped", "design", "yellow", "warm"))
+]]
+ = 
+	let {
+		bool tmp0 = false;
+		material_surface tmp1(df::custom_curve_layer(0.f, 1.f, 5.35999966f, 1.f, df::weighted_layer(0.349999994f, df::microfacet_ggx_smith_bsdf(histogram_range(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, 0.170000002f, math::lerp(0.399999976f, 0.736000001f, roughness * 0.699999988f)) * histogram_range(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, 0.170000002f, math::lerp(0.399999976f, 0.736000001f, roughness * 0.699999988f)), histogram_range(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, 0.170000002f, math::lerp(0.399999976f, 0.736000001f, roughness * 0.699999988f)) * histogram_range(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, 0.170000002f, math::lerp(0.399999976f, 0.736000001f, roughness * 0.699999988f)), color(1.f, 1.f, 1.f), color(1.f, 1.f, 1.f), state::texture_tangent_u(0), df::scatter_reflect), df::weighted_layer(1.f, df::microfacet_ggx_smith_bsdf(nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(color(histogram_range(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, math::lerp(0.40200001f, 0.245000005f, roughness * 0.699999988f), math::lerp(0.234000012f, 0.395000011f, roughness * 0.699999988f))), color(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).y), base::color_layer_add, math::lerp(0.189999998f, 0.569999993f, roughness * 0.699999988f)).tint, color(math::pow(1.f - float3(base::file_texture(texture_2d("./textures/brass_hammered_multi_R_pit_G_ao_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, 2.20000005f)), base::color_layer_add, math::lerp(0.185000002f, 0.960000038f, roughness * 0.699999988f)).mono * nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(color(histogram_range(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, math::lerp(0.40200001f, 0.245000005f, roughness * 0.699999988f), math::lerp(0.234000012f, 0.395000011f, roughness * 0.699999988f))), color(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).y), base::color_layer_add, math::lerp(0.189999998f, 0.569999993f, roughness * 0.699999988f)).tint, color(math::pow(1.f - float3(base::file_texture(texture_2d("./textures/brass_hammered_multi_R_pit_G_ao_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, 2.20000005f)), base::color_layer_add, math::lerp(0.185000002f, 0.960000038f, roughness * 0.699999988f)).mono, nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(color(histogram_range(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, math::lerp(0.40200001f, 0.245000005f, roughness * 0.699999988f), math::lerp(0.234000012f, 0.395000011f, roughness * 0.699999988f))), color(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).y), base::color_layer_add, math::lerp(0.189999998f, 0.569999993f, roughness * 0.699999988f)).tint, color(math::pow(1.f - float3(base::file_texture(texture_2d("./textures/brass_hammered_multi_R_pit_G_ao_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, 2.20000005f)), base::color_layer_add, math::lerp(0.185000002f, 0.960000038f, roughness * 0.699999988f)).mono * nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(color(histogram_range(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, math::lerp(0.40200001f, 0.245000005f, roughness * 0.699999988f), math::lerp(0.234000012f, 0.395000011f, roughness * 0.699999988f))), color(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).y), base::color_layer_add, math::lerp(0.189999998f, 0.569999993f, roughness * 0.699999988f)).tint, color(math::pow(1.f - float3(base::file_texture(texture_2d("./textures/brass_hammered_multi_R_pit_G_ao_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, 2.20000005f)), base::color_layer_add, math::lerp(0.185000002f, 0.960000038f, roughness * 0.699999988f)).mono, color(1.f, 1.f, 1.f), color(1.f, 1.f, 1.f), state::texture_tangent_u(0), df::scatter_reflect), bsdf(), normalmap_normal(texture_2d("./textures/hammered_norm.jpg", ::tex::gamma_linear), bump_strength, vmat_transform(texture_translate, texture_rotate, texture_scale, base::texture_coordinate_uvw, uv_space_index))), normalmap_normal(texture_2d("./textures/hammered_norm.jpg", ::tex::gamma_linear), bump_strength, vmat_transform(texture_translate, texture_rotate, texture_scale, base::texture_coordinate_uvw, uv_space_index))), df::tint(nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(gradient_lookup_smooth(texture_2d("./textures/brass_gradients_yellow_gold_red.png", ::tex::gamma_srgb), float3(base::file_texture(texture_2d("./textures/brass_hammered_multi_R_pit_G_ao_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).z, brass_type_select), color(math::pow(float3(base::file_texture(texture_2d("./textures/brass_hammered_multi_R_pit_G_ao_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, 2.20000005f)), base::color_layer_multiply, cavities_darkening * 0.75f + 0.25f).tint, color(float3(base::file_texture(texture_2d("./textures/brass_hammered_multi_R_pit_G_ao_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).y), base::color_layer_overlay, cavities_darkening * 0.75f + 0.25f).tint, df::weighted_layer(0.349999994f, df::microfacet_ggx_smith_bsdf(histogram_range(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, 0.170000002f, math::lerp(0.399999976f, 0.736000001f, roughness * 0.699999988f)) * histogram_range(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, 0.170000002f, math::lerp(0.399999976f, 0.736000001f, roughness * 0.699999988f)), histogram_range(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, 0.170000002f, math::lerp(0.399999976f, 0.736000001f, roughness * 0.699999988f)) * histogram_range(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, 0.170000002f, math::lerp(0.399999976f, 0.736000001f, roughness * 0.699999988f)), color(1.f, 1.f, 1.f), color(1.f, 1.f, 1.f), state::texture_tangent_u(0), df::scatter_reflect), df::weighted_layer(1.f, df::microfacet_ggx_smith_bsdf(nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(color(histogram_range(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, math::lerp(0.40200001f, 0.245000005f, roughness * 0.699999988f), math::lerp(0.234000012f, 0.395000011f, roughness * 0.699999988f))), color(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).y), base::color_layer_add, math::lerp(0.189999998f, 0.569999993f, roughness * 0.699999988f)).tint, color(math::pow(1.f - float3(base::file_texture(texture_2d("./textures/brass_hammered_multi_R_pit_G_ao_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, 2.20000005f)), base::color_layer_add, math::lerp(0.185000002f, 0.960000038f, roughness * 0.699999988f)).mono * nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(color(histogram_range(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, math::lerp(0.40200001f, 0.245000005f, roughness * 0.699999988f), math::lerp(0.234000012f, 0.395000011f, roughness * 0.699999988f))), color(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).y), base::color_layer_add, math::lerp(0.189999998f, 0.569999993f, roughness * 0.699999988f)).tint, color(math::pow(1.f - float3(base::file_texture(texture_2d("./textures/brass_hammered_multi_R_pit_G_ao_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, 2.20000005f)), base::color_layer_add, math::lerp(0.185000002f, 0.960000038f, roughness * 0.699999988f)).mono, nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(color(histogram_range(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, math::lerp(0.40200001f, 0.245000005f, roughness * 0.699999988f), math::lerp(0.234000012f, 0.395000011f, roughness * 0.699999988f))), color(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).y), base::color_layer_add, math::lerp(0.189999998f, 0.569999993f, roughness * 0.699999988f)).tint, color(math::pow(1.f - float3(base::file_texture(texture_2d("./textures/brass_hammered_multi_R_pit_G_ao_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, 2.20000005f)), base::color_layer_add, math::lerp(0.185000002f, 0.960000038f, roughness * 0.699999988f)).mono * nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(color(histogram_range(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, math::lerp(0.40200001f, 0.245000005f, roughness * 0.699999988f), math::lerp(0.234000012f, 0.395000011f, roughness * 0.699999988f))), color(float3(base::file_texture(texture_2d("./textures/hammered_multi_R_rough_G_corrspots_B_metal.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).y), base::color_layer_add, math::lerp(0.189999998f, 0.569999993f, roughness * 0.699999988f)).tint, color(math::pow(1.f - float3(base::file_texture(texture_2d("./textures/brass_hammered_multi_R_pit_G_ao_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), base::mono_alpha, base::texture_coordinate_info(state::texture_coordinate(0), state::texture_tangent_u(0), state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), tex::wrap_repeat, tex::wrap_repeat, false).tint).x, 2.20000005f)), base::color_layer_add, math::lerp(0.185000002f, 0.960000038f, roughness * 0.699999988f)).mono, color(1.f, 1.f, 1.f), color(1.f, 1.f, 1.f), state::texture_tangent_u(0), df::scatter_reflect), bsdf(), normalmap_normal(texture_2d("./textures/hammered_norm.jpg", ::tex::gamma_linear), bump_strength, vmat_transform(texture_translate, texture_rotate, texture_scale, base::texture_coordinate_uvw, uv_space_index))), normalmap_normal(texture_2d("./textures/hammered_norm.jpg", ::tex::gamma_linear), bump_strength, vmat_transform(texture_translate, texture_rotate, texture_scale, base::texture_coordinate_uvw, uv_space_index)))), state::normal()), material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		material_surface tmp2 = material_surface(scattering: bsdf(), emission: material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		color tmp3 = color(1.f, 1.f, 1.f);
+		material_volume tmp4 = material_volume(scattering: vdf(), absorption_coefficient: color(0.f, 0.f, 0.f), scattering_coefficient: color(0.f, 0.f, 0.f));
+		material_geometry tmp5(float3(0.f), 1.f, roundcorners_enable ? state::rounded_corner_normal(roundcorners_radius_mm * 0.00100000005f, roundcorners_across_materials, 1.f) : state::normal());
+		hair_bsdf tmp6 = hair_bsdf();
+	} in
+		material(
+			thin_walled: tmp0,
+			surface: tmp1,
+			backface: tmp2,
+			ior: tmp3,
+			volume: tmp4,
+			geometry: tmp5,
+			hair: tmp6);
+
+// 2
+export material Brass_Hammered_Yellow_Shiny_Soft_Hammering(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Hammered Yellow - Shiny Soft Hammering"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Hammered.Brass_Hammered_Yellow_Shiny_Soft_Hammering.png"),
+	// scratched, old, stained, crumpled, handled, worn, creative, smudged, bumped, matte, shiny
+	::anno::key_words(string[]("metal", "brass", "reflective", "shiny", "hammered", "bumped", "design", "yellow", "warm"))
+]] = Brass_Hammered(
+	brass_type_select:			0.0f,
+	cavities_darkening:			0.0f,
+	roughness:					0.0f,
+	bump_strength:				0.51f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+
+// 3
+export material Brass_Hammered_Yellow_Matte_Hammering(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Hammered Yellow - Matte Hammering"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Hammered.Brass_Hammered_Yellow_Matte_Hammering.png"),
+	// scratched, old, stained, crumpled, handled, worn, creative, smudged, bumped, matte, shiny
+	::anno::key_words(string[]("metal", "brass", "reflective", "matte", "hammered", "bumped", "design", "yellow", "warm"))
+]] = Brass_Hammered(
+	brass_type_select:			0.0f,
+	cavities_darkening:			1.0f,
+	roughness:					0.8f,
+	bump_strength:				0.99f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+
+// 4
+export material Brass_Hammered_Gold_Hammered_Darkened(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Hammered Gold - Hammered Darkened"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Hammered.Brass_Hammered_Gold_Hammered_Darkened.png"),
+	// scratched, old, stained, crumpled, handled, worn, creative, smudged, bumped, matte, shiny
+	::anno::key_words(string[]("metal", "brass", "reflective", "matte", "hammered", "bumped", "design", "gold", "warm"))
+]] = Brass_Hammered(
+	brass_type_select:			0.33f,
+	cavities_darkening:			1.0f,
+	roughness:					0.0f,
+	bump_strength:				0.99f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+
+// 5
+export material Brass_Hammered_Gold_Shiny_Soft_Hammering(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Hammered Gold - Shiny Soft Hammering"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Hammered.Brass_Hammered_Gold_Shiny_Soft_Hammering.png"),
+	// scratched, old, stained, crumpled, handled, worn, creative, smudged, bumped, matte, shiny
+	::anno::key_words(string[]("metal", "brass", "reflective", "shiny", "hammered", "bumped", "design", "gold", "warm"))
+]] = Brass_Hammered(
+	brass_type_select:			0.33f,
+	cavities_darkening:			0.0f,
+	roughness:					0.0f,
+	bump_strength:				0.51f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+
+// 6
+export material Brass_Hammered_Gold_Matte_Hammering(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Hammered Gold - Matte Hammering"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Hammered.Brass_Hammered_Gold_Matte_Hammering.png"),
+	// scratched, old, stained, crumpled, handled, worn, creative, smudged, bumped, matte, shiny
+	::anno::key_words(string[]("metal", "brass", "reflective", "matte", "hammered", "bumped", "design", "gold", "warm"))
+]] = Brass_Hammered(
+	brass_type_select:			0.33f,
+	cavities_darkening:			1.0f,
+	roughness:					0.8f,
+	bump_strength:				0.99f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+
+
+// 7
+export material Brass_Hammered_Red_Hammered_Darkened(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Hammered Red - Hammered Darkened"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Hammered.Brass_Hammered_Red_Hammered_Darkened.png"),
+	// scratched, old, stained, crumpled, handled, worn, creative, smudged, bumped, matte, shiny
+	::anno::key_words(string[]("metal", "brass", "reflective", "matte", "hammered", "bumped", "design", "red", "warm"))
+]] = Brass_Hammered(
+	brass_type_select:			0.33f,
+	cavities_darkening:			1.0f,
+	roughness:					0.0f,
+	bump_strength:				0.99f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+
+// 8
+export material Brass_Hammered_Red_Shiny_Soft_Hammering(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Hammered Red - Shiny Soft Hammering"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Hammered.Brass_Hammered_Red_Shiny_Soft_Hammering.png"),
+	// scratched, old, stained, crumpled, handled, worn, creative, smudged, bumped, matte, shiny
+	::anno::key_words(string[]("metal", "brass", "reflective", "shiny", "hammered", "bumped", "design", "red", "warm"))
+]] = Brass_Hammered(
+	brass_type_select:			0.33f,
+	cavities_darkening:			0.0f,
+	roughness:					0.0f,
+	bump_strength:				0.51f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+
+// 9
+export material Brass_Hammered_Red_Matte_Hammering(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Brass Hammered Red - Matte Hammering"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Brass_Hammered.Brass_Hammered_Red_Matte_Hammering.png"),
+	// scratched, old, stained, crumpled, handled, worn, creative, smudged, bumped, matte, shiny
+	::anno::key_words(string[]("metal", "brass", "reflective", "matte", "hammered", "bumped", "design", "red", "warm"))
+]] = Brass_Hammered(
+	brass_type_select:			0.33f,
+	cavities_darkening:			1.0f,
+	roughness:					0.8f,
+	bump_strength:				0.99f,
+	texture_translate:			float2(0.0f),
+	texture_rotate:				0.0f,
+	texture_scale:				float2(1.0f),
+	roundcorners_enable:		false,
+	roundcorners_radius_mm:		1.0f,
+	roundcorners_across_materials: false,
+	uv_space_index:				0
+);
+
+
+
+

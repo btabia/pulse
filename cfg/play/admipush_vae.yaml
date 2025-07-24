@@ -1,0 +1,8 @@
+---
+algo:
+  type: "TQC"
+load_policy: False 
+policy_path: "/home/btabia/git/new/Malleabot/training_data/TQC_774/checkpoint_610000_steps.zip"
+deterministic: False
+total_episode_run: 20
+data_log_path: "/home/btabia/git/residual_soft_push/datalog"

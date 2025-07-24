@@ -1,0 +1,72 @@
+---
+
+name: "BaseEnv-v0"
+
+
+env_cfg: 
+  env_path: "/home/btabia/git/new/Malleabot/assets/env_setup/env_ycb.usd"
+  decimation: 15 # skip frame
+  decimation_cmd: 1
+  episode_length_s : 25
+  action_scale : [0.025, 0.025, 20] #Dx, Dy, Dtheta
+  feature_extractor: 
+    type: "GAT"
+    shape: 4096 
+    k_neighbour: 4
+    virtual_node_link: 2
+  num_actions : 3
+  tool_num_obs: 14
+  vision_h: 128
+  vision_w: 128
+  state_space : 0
+  device: "cpu" #"cuda:${oc.decode:${oc.env:CUDA_DEVICE}}"
+  seed: 42
+simulation_cfg:
+  freq: 150
+  use_fabric: False
+  enable_gpu_dynamics: True
+  solver_type: "TGS"
+
+
+scene: 
+  num_envs: 1
+  env_spacing: 0
+controller: 
+  type: "task_space"
+robot_cfg:
+  robot_name: 
+  ee_name:
+  prim_path: 
+  joint_names_expr: "joint_.*"
+  stiffness: 
+    joint_1: 100
+    joint_2: 100
+    joint_3: 100
+    joint_4: 100
+    joint_5: 100
+    joint_6: 100
+    joint_7: 100
+  damping: 
+    joint_1: 10
+    joint_2: 10 
+    joint_3: 10
+    joint_4: 10
+    joint_5: 10
+    joint_6: 10
+    joint_7: 10
+cameras:
+  num: 4
+  prim_path_0: "/World/rsd455/RSD455/Camera_Pseudo_Depth"
+  prim_path_1: "/World/rsd455_01/RSD455/Camera_Pseudo_Depth"
+  prim_path_2: "/World/rsd455_02/RSD455/Camera_Pseudo_Depth"
+  prim_path_3: "/World/rsd455_03/RSD455/Camera_Pseudo_Depth"
+  update_period: 0
+  height: 240
+  width: 424
+  data_types: ["distance_to_image_plane"]
+  colorize_semantic_segmentation: False
+  colorize_instance_id_segmentation: True
+  colorize_instance_segmentation: False
+  spawn: None
+  
+

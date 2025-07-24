@@ -1,0 +1,136 @@
+/******************************************************************************
+ *          Copyright 2024 NVIDIA Corporation. All rights reserved.           *
+ ******************************************************************************
+ 
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our 
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL 
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA's Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any 
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR 
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, 
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF 
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+mdl 1.6;
+
+import ::df::*;
+import ::anno::*;
+import ::base::*;
+import ::math::*;
+import ::nvidia::core_definitions::thick_glass;
+import ::state::normal;
+
+const string COPYRIGHT = 
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+
+
+export material Amethyst(
+	color transmission_color = color ( 0.9647059f , 0.6862745f , 0.9647059f)
+    [[
+        ::anno::display_name("Transmission Color"),
+        ::anno::description("Color effect for transmission independent of thickness of the object."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform color volume_color = color ( 0.427451f , 0.1294118f , 0.4745098f)
+    [[
+        ::anno::display_name("Volume Color"),
+        ::anno::description("Color effect for volume of the object reached at transmission distance."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float clarity =  1.f
+    [[
+        ::anno::display_name("Clarity"),
+        ::anno::description("Use to adapt to size of gem, smaller numbers darken the gem."),
+        ::anno::soft_range(0.1,10.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform bool dispersion = true
+    [[
+        ::anno::display_name("Dispersion"),
+        ::anno::description("Enable or disable the dispersion."),
+        ::anno::in_group("Advanced")
+    ]]
+)
+[[
+    ::anno::display_name("Amethyst"),
+    ::anno::description("Amethyst gem material (Default values based on 2cm stone size.)"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+    ::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Amethyst.Amethyst.png"),
+	::anno::key_words(string[]("gem", "jewelry", "gemstone", "transmissive", "new", "design", "amethyst", "purple"))
+]]
+ = let{
+	 
+	//color transmission_color = color(1.0);
+    color glass_color = volume_color;
+    float roughness = 0.0;
+    float volume_ior = 1.54f;
+    //uniform bool dispersion = true;
+    uniform float abbe_number = 67.82f;
+    uniform float base_thickness = clarity * 0.008f;
+    float3 normal = state::normal();
+	
+    bsdf glossy_bsdf = df::simple_glossy_bsdf(
+        mode: df::scatter_reflect,
+        tint: color(1.),
+        roughness_u: roughness
+    );
+    bsdf glossy_bsdf_transmission = df::simple_glossy_bsdf(
+        mode: df::scatter_transmit,
+        tint: transmission_color,
+        roughness_u: roughness
+    );
+} in material(
+    thin_walled: false,
+    surface: material_surface(
+        df::weighted_layer(
+            normal: normal,
+            weight: 1.,
+            layer: df::color_fresnel_layer(
+                layer: glossy_bsdf,
+                base: glossy_bsdf_transmission,
+               
+                ior: dispersion?::base::abbe_number_ior(volume_ior, abbe_number):color(volume_ior)
+            )
+        )
+    ),
+    volume: material_volume(
+        absorption_coefficient: (base_thickness <= 0)? color(0): math::log(glass_color) / -base_thickness
+    ),
+    ior: dispersion?base::abbe_number_ior(volume_ior, abbe_number):color(volume_ior)
+);

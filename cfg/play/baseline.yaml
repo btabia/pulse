@@ -1,0 +1,9 @@
+---
+algo:
+  type: "TQC"
+load_policy: True 
+policy_path: "/home/btabia/git/new/Malleabot/training_data/TQC_796/checkpoint_1460000_steps.zip" # resilient-gorge-6
+deterministic: True
+total_episode_run: 200
+
+

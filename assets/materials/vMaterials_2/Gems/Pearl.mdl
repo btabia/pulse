@@ -1,0 +1,121 @@
+/******************************************************************************
+ *          Copyright 2024 NVIDIA Corporation. All rights reserved.           *
+ ******************************************************************************
+ 
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our 
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL 
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA's Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any 
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR 
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, 
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF 
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+mdl 1.6;
+
+import ::anno::*;
+import ::nvidia::core_definitions::apply_clearcoat;
+import ::nvidia::core_definitions::apply_colorfalloff;
+import ::nvidia::core_definitions::blend;
+import ::nvidia::core_definitions::flex_material;
+import ::state::normal;
+
+const string COPYRIGHT = 
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+
+export material Pearl(
+    uniform color diffuse =  color ( 0.8509804f , 0.7960784f , 0.7215686f)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Base color of the pearl."),
+        ::anno::in_group("Appearance")
+    ]])
+[[
+	::anno::display_name("Pearl"),
+    ::anno::description("Pearl gem material (Default values based on 2cm stone size.)"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+    ::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Pearl.Pearl.png"),
+	::anno::key_words(string[]("gem", "jewelry", "gemstone", "transmissive", "new", "design", "pearl", "pink", "light"))
+]]= 
+::nvidia::core_definitions::apply_clearcoat(
+    base:  ::nvidia::core_definitions::blend(
+        base:  ::nvidia::core_definitions::flex_material(
+            base_color:  diffuse,
+            diffuse_roughness:  0.2f,
+            is_metal:  false,
+            reflectivity:  0.7f,
+            reflection_roughness:  0.07f,
+            anisotropy:  0.f,
+            anisotropy_rotation:  0.f,
+            transparency:  0.f,
+            transmission_color:  color ( 1.f , 1.f , 1.f),
+            volume_color:  color ( 1.f , 1.f , 1.f),
+            transmission_roughness:  0.f,
+            base_thickness:  0.1f,
+            ior:  1.5f,
+            thin_walled:  false,
+            normal:  ::state::normal ()),
+        blend:  ::nvidia::core_definitions::apply_colorfalloff(
+            base:  ::nvidia::core_definitions::flex_material(
+                base_color:  diffuse,
+                diffuse_roughness:  0.2f,
+                is_metal:  false,
+                reflectivity:  0.7f,
+                reflection_roughness:  0.07f,
+                anisotropy:  0.f,
+                anisotropy_rotation:  0.f,
+                transparency:  0.f,
+                transmission_color:  color ( 1.f , 1.f , 1.f),
+                volume_color:  color ( 1.f , 1.f , 1.f),
+                transmission_roughness:  0.f,
+                base_thickness:  0.1f,
+                ior:  1.5f,
+                thin_walled:  false,
+                normal:  ::state::normal ()),
+            color_0:  color ( 0.4392157f , 0.3372549f , 0.1411765f),
+            color_1:  color ( 0.8039216f , 0.8509804f , 1.f),
+            color_2:  color ( 1.f , 0.7294118f , 0.9882353f),
+            color_3:  color ( 1.f , 0.5333334f , 0.9568627f),
+            color_4:  color ( 1.f , 0.7333333f , 0.1647059f)),
+        weight:  0.6f),
+    ior:  1.6f,
+    roughness:  0.1f,
+    visibility:  1.f,
+    normal:  ::state::normal (),
+    coat_filter_color:  color ( 1.f , 1.f , 1.f));

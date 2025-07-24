@@ -1,0 +1,1342 @@
+/******************************************************************************
+ *	 Copyright 2024 NVIDIA Corporation. All rights reserved.
+ ******************************************************************************
+ 
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our 
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL 
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA's Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any 
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR 
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, 
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF 
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+
+mdl 1.5;
+
+import ::anno::*;
+import ::base::*;
+import ::df::*;
+import ::math::*;
+import ::state::*;
+import ::tex::*;
+import ::nvidia::core_definitions::blend_colors;
+import ::nvidia::core_definitions::dimension;
+
+const string COPYRIGHT = 
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+const string DESCRIPTION = "A sheet metal material with adjustable imperfections";
+const string DESCRIPTION_PUNCH = "Punched tungsten sheet metal material with adjustable imperfections and punchings.";
+
+
+float4 tile_select(uniform int select = 0)
+{
+	switch (select)
+	{
+		case 0: return float4(0.000, 0.333, 0.666, 1.000);
+		case 1: return float4(0.333, 0.666, 0.666, 1.000);
+		case 2: return float4(0.666, 1.000, 0.666, 1.000);		
+		
+		case 3: return float4(0.000, 0.333, 0.333, 0.666);
+		case 4: return float4(0.333, 0.666, 0.333, 0.666);
+		case 5: return float4(0.666, 1.000, 0.333, 0.666);
+		
+		case 6: return float4(0.000, 0.333, 0.000, 0.333);
+		case 7: return float4(0.333, 0.666, 0.000, 0.333);
+		case 8: return float4(0.666, 1.000, 0.000, 0.333);
+		
+		default: return float4(0.000, 0.333, 0.000, 0.333);
+	}
+}
+
+export struct vm_coordinates
+[[
+	::anno::hidden()
+]]
+{
+	float2 uv;
+	float rotation;
+	int uv_space_index;
+	float4 carry;
+};
+
+enum vm_mono_select 
+[[
+	anno::description("Modes for the creation of a gray-scale value from a color"),
+	anno::hidden()
+]]
+{
+	mono_r = 0,
+	mono_g = 1,
+	mono_b = 2,
+	mono_a = 3,
+	mono_average = 4
+};
+
+vm_coordinates vm_coord
+(
+	float2 translation	= float2(0.0f, 0.0) [[
+		::anno::display_name("Translation"),
+		::anno::description("Translates the coordinates.")
+	]],
+	float rotation 		= 0.0f [[
+		::anno::display_name("Rotation"),
+		::anno::description("Rotates the coordinates in degrees.")
+	]],
+	float2 scaling		= float2(1.0f, 1.0f) [[
+		::anno::display_name("Scaling"),
+		::anno::description("Scales the coordinates.")
+	]],	
+	uniform int uv_space = 0 [[
+		::anno::display_name("UV Space"),
+		::anno::description("Chose the UV space.")
+	]]
+)
+[[
+		::anno::display_name("vm Transform"),
+		::anno::description("Generates coordinates to be used in vm_lookup functions.")
+]]
+{
+	vm_coordinates uv;
+	::base::texture_coordinate_info info = ::base::coordinate_source( ::base::texture_coordinate_uvw, uv_space);
+	uv.rotation = (rotation * 3.1415926535897932384626433832f) / 180.f;
+	uv.uv = float2(info.position.x, info.position.y);
+	float sine   = ::math::sin(uv.rotation);
+	float cosine = ::math::cos(uv.rotation);
+	float2x2 rot = float2x2(cosine, -sine, sine, cosine);
+	uv.uv = rot * uv.uv;
+	uv.uv /= scaling;
+	uv.uv += translation;
+	return uv;
+}
+
+
+vm_coordinates vm_coord_hex(	
+				vm_coordinates uv, 
+				float scale = 1.0f)
+{
+	vm_coordinates uv_return;
+	float2 uv_ = float2(uv.uv.x, uv.uv.y);
+	
+	// same as from function get_hex above
+	float2 s = float2(1.0f,  1.7320508f);
+	float2 n = uv_ - float2(0.5f, 1.0f);
+	float4 c = ::math::floor(float4(uv_.x, uv_.y, n.x, n.y)/float4(s.x, s.y, s.x, s.y)) + 0.5f;
+	float2 h_1 = uv_ -  float2(c.x, c.y) * s;
+	float2 h_2 = uv_ -  (float2(c.z, c.w) + float2(0.5f)) * s;
+	float4 uv_id = ::math::dot(h_1, h_1) < ::math::dot(h_2, h_2) ? float4(h_1.x, h_1.y, c.x, c.y) : float4(h_2.x, h_2.y, c.z, c.w);
+	
+	uv_return.uv = float2(uv_id.x*scale+0.5, uv_id.y*scale+0.5);
+	// unless we introduce random cell rotations where we need to compensate for this in the rotation 
+	// we can just plain copy the rotation value
+	uv_return.rotation = uv.rotation;
+	return uv_return;
+}
+
+// Offsets a set of uv coordinates in either row (u) or column (v) direction
+vm_coordinates vm_coord_rowcol_offset(
+	vm_coordinates uv,
+	float offset,
+	bool horizontal_offset = true
+)
+{
+	int index = horizontal_offset ? 0 : 1;
+	uv.uv[index] += ::math::floor(uv.uv[index ^ 1]) * offset;
+	return uv;
+}
+
+vm_coordinates vm_coord_grid(
+				vm_coordinates uv,
+				float scale = 1.0f
+)
+{
+	float2x2 scal = float2x2(scale, 0., 0., scale);
+	uv.uv = ::math::frac(uv.uv);
+	uv.uv -= 0.5f;
+	uv.uv = scal * uv.uv;
+	uv.uv = uv.uv + 0.5f;
+	return uv;
+}
+
+::base::texture_return vm_tex_lookup(
+	uniform texture_2d tex,
+	vm_coordinates uv = vm_coord(),
+	uniform vm_mono_select mono_source = mono_a,
+	float4 scale = float4(1.0f),
+	
+	uniform ::tex::wrap_mode wrap_u = ::tex::wrap_repeat,
+	uniform ::tex::wrap_mode wrap_v = ::tex::wrap_repeat,
+	uniform float2 crop_u = float2(0.0, 1.0),
+	uniform float2 crop_v = float2(0.0, 1.0)
+)
+{
+	float mono;
+	float4 lookup = ::tex::lookup_float4(tex, uv.uv, wrap_u, wrap_v, crop_u, crop_v) * scale;
+	switch( mono_source ) {
+		case mono_r: mono = lookup.x;
+			break;
+		case mono_g: mono = lookup.y;
+			break;
+		case mono_b: mono = lookup.z;
+			break;
+		case mono_a: mono = lookup.w;
+			break;
+		case mono_average: mono = ::math::average(float3(lookup.x, lookup.y, lookup.z));
+			break;
+	}
+	return ::base::texture_return(color(lookup.x, lookup.y, lookup.z), mono);
+}
+
+//  	*** SET CUTOUT ENUM NAMES ***
+export enum cutout_pattern
+[[
+	::anno::description("Cutout Pattern."),
+	::anno::hidden()
+]]
+{
+	pattern_circle = 0
+		[[ ::anno::display_name("Circle")]],
+	pattern_hexagon = 1
+		[[ ::anno::display_name("Hexagon")]],
+	pattern_line = 2
+		[[ ::anno::display_name("Line") ]],
+		
+	pattern_square = 3
+		[[ ::anno::display_name("Square")]],
+	pattern_rectangle = 4
+		[[ ::anno::display_name("Rectangle")]],	
+	pattern_cross = 5
+		[[ ::anno::display_name("Cross")]],
+		
+	pattern_rhombus = 6
+		[[ ::anno::display_name("Rhombus")]],
+	pattern_triangle = 7
+		[[ ::anno::display_name("Triangle")]],	
+	pattern_star = 8
+		[[ ::anno::display_name("Star")]]		
+};
+
+float remap_xy_to_0_1(float input, float x, float y)
+{
+	return (input - x)/(y - x);
+}
+
+float histogram_scan_big(float input, float width, float position)
+{
+	return ::math::clamp(
+				remap_xy_to_0_1(input,
+					::math::lerp(-width, 1.0, position),
+					::math::lerp(0.0, 1.0 + width, position)),
+				0.0,
+				1.0);
+}
+
+
+::base::texture_coordinate_info vmat_transform(
+								uniform float2 translation = float2(0.0, 0.0),
+								uniform float rotation	 = 0.0,
+								uniform float2 scaling	 = float2(1.0, 1.0),
+								uniform ::base::texture_coordinate_system system = ::base::texture_coordinate_uvw,
+								uniform int uv_space	   = 0
+)
+{
+	float rotation_rad = (rotation * 3.1415926535897932384626433832f) / 180.f;
+	
+	float4x4 scale =
+	float4x4(1.0 /scaling.x, 0.			 ,  0. ,	 0.,
+			 0.			, 1.0 /scaling.y ,  0. ,	 0.,
+			 0.			, 0.			 ,  1.0,	 0.,
+			 translation.x , translation.y  ,  0.0,	 1.);
+
+	float s = ::math::sin(rotation_rad);
+	float c = ::math::cos(rotation_rad);
+	float4x4 rotate =
+	float4x4(  c  ,  -s   , 0.0 , 0.0,
+			   s  ,   c   , 0.0 , 0.0,
+			   0.0,   0.0 , 1.0 , 0.0,
+			   0. ,   0.0 , 0.0 , 1.);
+	
+	return ::base::transform_coordinate(scale*rotate, ::base::coordinate_source(system, uv_space));
+}
+
+float uint2float(int x)
+{
+	return float(x & 0x7FFFFFFF) + (x < 0 ? 2147483648.0 : 0.0);
+}
+
+int lowbias32(int x)
+{
+	x ^= x >>> 16;
+	x *= 0x7feb352d;
+	x ^= x >>> 15;
+	x *= 0x846ca68b;
+	x ^= x >>> 16;
+	return x;
+}
+
+float2 rnd22(int2 p) {
+	float2 ret_val = float2(
+		uint2float(lowbias32(p[0] + lowbias32(p[1]))) / 4294967296.f,
+		uint2float(lowbias32(p[0] + 32000 + lowbias32(p[1]))) / 4294967296.f
+	);
+	return ret_val;
+}	
+
+float3 srgb2rgb(float3 val)
+{
+	return ::math::pow(::math::max(val, float3(0.0f)), 2.2);
+}
+
+float2x2 invert_2x2(float2x2 M)
+{
+	float det = M[0][0]*M[1][1] - M[0][1]*M[1][0];
+	//https://www.chilimath.com/lessons/advanced-algebra/inverse-of-a-2x2-matrix/
+	return (1.0 / det) * float2x2(M[1][1], -M[0][1], -M[1][0], M[0][0]);
+}
+
+float3 nonrepeat_lookup(
+	uniform texture_2d texture = texture_2d(),
+	::base::texture_coordinate_info uvw = ::base::coordinate_source(),
+	float texture_scale = 1.0,
+	float3 average_color = float3(0.5),
+	float patch_size = 8.0
+)
+{
+	
+	float2 uv_in = float2(uvw.position[0], uvw.position[1]) * texture_scale;
+	float Z =  patch_size;	 // patch scale inside example texture
+	float CON = 1.0f;
+	
+	float3 O = float3(0.f);
+	float2x2 M0 = float2x2(1.f,0.f, 0.5f, ::math::sqrt(3.f)/2.f);
+	float2x2 M = invert_2x2(M0); // transform matrix <-> tilted space
+	
+	float2 U = uv_in;
+	float2 V = M * uv_in; //pre-tilted hexa coordinates
+	int2 I = int2(::math::floor(V)); // hexa-tile id
+	
+	// The mean color needs to be determined in Photoshop then to make the
+	// average color work out, take the float value and calculate the apropriate
+	// mean value as (value^(1/2.2))
+
+	float3 m = average_color;
+	
+	float3 F = float3(::math::frac(V)[0], ::math::frac(V)[1], 0.f), W;
+	F[2] = 1.0 - F[0] - F[1]; // local hexa coordinates
+	
+	if( F[2] > 0.f )
+
+		O = (W[0] = F[2]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I))) - m*float(CON))
+		  + (W[1] = F[1]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(0,1)))) - m*float(CON))
+		  + (W[2] = F[0]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(1,0)))) - m*float(CON));
+	else
+		O = (W[0] =	  -F[2]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(1))))   - m*float(CON))
+		  + (W[1] = 1.f - F[1]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(1, 0)))) - m*float(CON))
+		  + (W[2] = 1.f - F[0]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(0, 1)))) - m*float(CON));
+	O = m + O/::math::length(W);
+	O = ::math::clamp( (O), 0.0, 1.0);
+	
+	return float3(O);
+}
+
+color endless_texture(
+	uniform texture_2d texture = texture_2d(),
+	::base::texture_coordinate_info uvw = ::base::coordinate_source(),
+	float texture_scale = 10.0,
+	float3 average_color = float3(0.5, 0.5, 1.0),
+	float patch_size = 8.0,
+	bool gamma_correct_lookup = true
+)
+{
+	return gamma_correct_lookup ? color(srgb2rgb(
+			nonrepeat_lookup (
+				texture: texture,
+				uvw: uvw,
+				texture_scale: texture_scale,
+				average_color: average_color,
+				patch_size: patch_size
+			))
+		) : color(nonrepeat_lookup (
+			texture: texture,
+			uvw: uvw,
+			texture_scale: texture_scale,
+			average_color: average_color,
+			patch_size: patch_size
+		));
+}
+
+
+export material Tungsten_Sheet(
+	uniform bool infinite_tiling = false [[
+		::anno::description("Enables infinite tiling feature which removes repeating texture patterns. Note that depending on the material this feature changes the appearance of the material slightly."),
+		::anno::display_name("Infinite Tiling"),
+		::anno::in_group("Appearance", "Main")
+	]],
+	float sheet_brightness = 0.5f [[
+		::anno::display_name("Brightness"),
+		::anno::description("Controls the brightness of the material."),
+		::anno::in_group("Appearance", "Main"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	float roughness = 0.2f [[
+		::anno::display_name("Roughness"),
+		::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+		::anno::in_group("Appearance", "Main"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	float streaks = 0.0f [[
+		::anno::display_name("Streaks Weight"),
+		::anno::description("Adds directional streaks that occur as part of the sheet manufacturing process."),
+		::anno::in_group("Appearance", "Main"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	uniform float scratch_bump_factor = 0.0f [[
+		::anno::description("Determines the degree of bumpiness."),
+		::anno::display_name("Bump Factor Streaks"),
+		::anno::in_group("Appearance", "Main"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	float imperfections_amount = 0.6f [[
+		::anno::description("Balances between a perfectly smooth metal and a surface that has various imperfections."),
+		::anno::display_name("Imperfections Amount"),
+		::anno::in_group("Appearance", "Imperfections"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	uniform float impurities_weight_1 = 0.f [[
+		::anno::display_name("Washed Imperfections Ratio"),
+		::anno::in_group("Appearance", "Imperfections"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	uniform float impurities_weight_2 = 0.939f [[
+		::anno::display_name("Noisy Imperfections Ratio"),
+		::anno::in_group("Appearance", "Imperfections"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	uniform float impurities_weight_3 = 0.0 [[
+		::anno::display_name("Splotchy Imperfection Ratio"),
+		::anno::in_group("Appearance", "Imperfections"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	uniform bool enable_round_corners = false [[
+		::anno::description("Enables the round corner effect. Comes at a slight performance cost as additional raytracing calls are required to evaluate the round corner effect."),
+		::anno::display_name("Enable Round Corners"),
+		::anno::in_group("Round Corners")
+	]],
+	uniform float roundcorner_radius = 0.01f [[
+		::anno::description("Radius of the rounded corners."),
+		::anno::display_name("Round Corner Radius"),
+		::anno::in_group("Round Corners"),
+		::anno::soft_range(0.f, 0.1f)
+	]],
+	uniform bool across_materials = false [[
+		::anno::display_name("Across Materials"),
+		::anno::in_group("Round Corners")
+	]],
+	uniform float2 texture_translate = float2(0.f) [[
+		::anno::description("Controls the position of the texture."),
+		::anno::display_name("Texture Translate"),
+		::anno::in_group("Transform")
+	]],
+	uniform float texture_rotate = 0.f [[
+		::anno::description("Rotates angle of the texture in degrees."),
+		::anno::display_name("Texture Rotate"),
+		::anno::in_group("Transform"),
+		::anno::soft_range(0.f, 360.f)
+	]],
+	uniform float2 texture_scale = float2(1.0f) [[
+		::anno::description("Larger numbers increase the size."),
+		::anno::display_name("Texture Scale"),
+		::nvidia::core_definitions::dimension(float2(0.75f, 0.75f)),
+		::anno::in_group("Transform")
+	]],
+	uniform int uv_space_index = 0 [[
+		::anno::display_name("UV Space Index"),
+		::anno::description("Uses selected UV space for material."),
+		::anno::in_group("Transform")
+	]]
+)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Metal Sheet Tungsten - New Clean"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Tungsten_Sheet.Tungsten_Sheet.png"),
+	::anno::key_words(string[]("metal", "sheet", "tungsten", "imperfections", "new", "unfinished", "reflective", "design", "infinite tiling", "neutral"))
+]]
+ = 
+	let {
+		color normal_reflectivity = color(0.951001417565f, 0.815051845356f, 0.751931718925f); // Tungsten
+		color grazing_reflectivity = color(0.99942f, 1.f, 1.f);
+		
+		bool tmp0 = false;
+		material_surface tmp1(
+			::df::color_custom_curve_layer(normal_reflectivity, grazing_reflectivity, 5.f, color(::math::lerp(0.400000006f, 1.f, sheet_brightness) * ::math::lerp(1.f, ::math::pow(float3(::base::file_texture(texture_2d("./textures/sheet_metal_R_rough_G_ao_B_streaks.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[1], 2.20000005f), ::math::lerp(0.f, 0.300000012f, streaks))), ::df::weighted_layer(0.0700000003f, ::df::microfacet_ggx_smith_bsdf(0.150000006f, 0.150000006f, color(1.f, 1.f, 1.f), ::state::texture_tangent_u(0), ::df::scatter_reflect, ""), ::df::microfacet_ggx_smith_bsdf((::math::lerp(roughness * 0.5f, (impurities_weight_1 + impurities_weight_2 + impurities_weight_3 > 0.f ? impurities_weight_1 / (impurities_weight_1 + impurities_weight_2 + impurities_weight_3) : 0.333299994f) * roughness * float3(infinite_tiling ? endless_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.633000016f, 0.495000005f, 0.542999983f), 2.f, false) : ::base::file_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0] + (impurities_weight_1 + impurities_weight_2 + impurities_weight_3 > 0.f ? impurities_weight_2 / (impurities_weight_1 + impurities_weight_2 + impurities_weight_3) : 0.333299994f) * roughness * float3(infinite_tiling ? endless_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.633000016f, 0.495000005f, 0.542999983f), 2.f, false) : ::base::file_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[1] + (impurities_weight_1 + impurities_weight_2 + impurities_weight_3 > 0.f ? impurities_weight_3 / (impurities_weight_1 + impurities_weight_2 + impurities_weight_3) : 0.333299994f) * roughness * float3(infinite_tiling ? endless_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.633000016f, 0.495000005f, 0.542999983f), 2.f, false) : ::base::file_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2], imperfections_amount) + (float3(::base::file_texture(texture_2d("./textures/sheet_metal_R_rough_G_ao_B_streaks.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0] - 0.5f) * (streaks * 0.5f * 0.5f)) * (::math::lerp(roughness * 0.5f, (impurities_weight_1 + impurities_weight_2 + impurities_weight_3 > 0.f ? impurities_weight_1 / (impurities_weight_1 + impurities_weight_2 + impurities_weight_3) : 0.333299994f) * roughness * float3(infinite_tiling ? endless_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.633000016f, 0.495000005f, 0.542999983f), 2.f, false) : ::base::file_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0] + (impurities_weight_1 + impurities_weight_2 + impurities_weight_3 > 0.f ? impurities_weight_2 / (impurities_weight_1 + impurities_weight_2 + impurities_weight_3) : 0.333299994f) * roughness * float3(infinite_tiling ? endless_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.633000016f, 0.495000005f, 0.542999983f), 2.f, false) : ::base::file_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[1] + (impurities_weight_1 + impurities_weight_2 + impurities_weight_3 > 0.f ? impurities_weight_3 / (impurities_weight_1 + impurities_weight_2 + impurities_weight_3) : 0.333299994f) * roughness * float3(infinite_tiling ? endless_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.633000016f, 0.495000005f, 0.542999983f), 2.f, false) : ::base::file_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2], imperfections_amount) + (float3(::base::file_texture(texture_2d("./textures/sheet_metal_R_rough_G_ao_B_streaks.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0] - 0.5f) * (streaks * 0.5f * 0.5f)), (::math::lerp(roughness * 0.5f, (impurities_weight_1 + impurities_weight_2 + impurities_weight_3 > 0.f ? impurities_weight_1 / (impurities_weight_1 + impurities_weight_2 + impurities_weight_3) : 0.333299994f) * roughness * float3(infinite_tiling ? endless_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.633000016f, 0.495000005f, 0.542999983f), 2.f, false) : ::base::file_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0] + (impurities_weight_1 + impurities_weight_2 + impurities_weight_3 > 0.f ? impurities_weight_2 / (impurities_weight_1 + impurities_weight_2 + impurities_weight_3) : 0.333299994f) * roughness * float3(infinite_tiling ? endless_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.633000016f, 0.495000005f, 0.542999983f), 2.f, false) : ::base::file_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[1] + (impurities_weight_1 + impurities_weight_2 + impurities_weight_3 > 0.f ? impurities_weight_3 / (impurities_weight_1 + impurities_weight_2 + impurities_weight_3) : 0.333299994f) * roughness * float3(infinite_tiling ? endless_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.633000016f, 0.495000005f, 0.542999983f), 2.f, false) : ::base::file_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2], imperfections_amount) + (float3(::base::file_texture(texture_2d("./textures/sheet_metal_R_rough_G_ao_B_streaks.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0] - 0.5f) * (streaks * 0.5f * 0.5f)) * (::math::lerp(roughness * 0.5f, (impurities_weight_1 + impurities_weight_2 + impurities_weight_3 > 0.f ? impurities_weight_1 / (impurities_weight_1 + impurities_weight_2 + impurities_weight_3) : 0.333299994f) * roughness * float3(infinite_tiling ? endless_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.633000016f, 0.495000005f, 0.542999983f), 2.f, false) : ::base::file_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0] + (impurities_weight_1 + impurities_weight_2 + impurities_weight_3 > 0.f ? impurities_weight_2 / (impurities_weight_1 + impurities_weight_2 + impurities_weight_3) : 0.333299994f) * roughness * float3(infinite_tiling ? endless_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.633000016f, 0.495000005f, 0.542999983f), 2.f, false) : ::base::file_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[1] + (impurities_weight_1 + impurities_weight_2 + impurities_weight_3 > 0.f ? impurities_weight_3 / (impurities_weight_1 + impurities_weight_2 + impurities_weight_3) : 0.333299994f) * roughness * float3(infinite_tiling ? endless_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 2.f, float3(0.633000016f, 0.495000005f, 0.542999983f), 2.f, false) : ::base::file_texture(texture_2d("./textures/sheet_metal_multi_rough.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2], imperfections_amount) + (float3(::base::file_texture(texture_2d("./textures/sheet_metal_R_rough_G_ao_B_streaks.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0] - 0.5f) * (streaks * 0.5f * 0.5f)), color(1.f, 1.f, 1.f), ::state::texture_tangent_u(0), ::df::scatter_reflect, ""), ::math::normalize(::math::lerp(::state::normal(), ::base::tangent_space_normal_texture(texture_2d("./textures/sheet_metal_norm.jpg", ::tex::gamma_linear), scratch_bump_factor, false, false, ::base::texture_coordinate_info(::state::texture_coordinate(0), ::state::texture_tangent_u(0), ::state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 1.f, 0.f), histogram_scan_big(float3(::base::file_texture(texture_2d("./textures/sheet_metal_R_rough_G_ao_B_streaks.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2], 0.242000014f, 0.850000024f)))), bsdf(), ::math::normalize(::math::lerp(::state::normal(), ::base::tangent_space_normal_texture(texture_2d("./textures/sheet_metal_norm.jpg", ::tex::gamma_linear), scratch_bump_factor, false, false, ::base::texture_coordinate_info(::state::texture_coordinate(0), ::state::texture_tangent_u(0), ::state::texture_tangent_v(0)), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 1.f, 0.f), histogram_scan_big(float3(::base::file_texture(texture_2d("./textures/sheet_metal_R_rough_G_ao_B_streaks.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_average, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2], 0.242000014f, 0.850000024f)))),
+			material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		material_surface tmp2 = material_surface(scattering: bsdf(), emission: material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		color tmp3 = color(1.f, 1.f, 1.f);
+		material_volume tmp4 = material_volume(scattering: vdf(), absorption_coefficient: color(0.f, 0.f, 0.f), scattering_coefficient: color(0.f, 0.f, 0.f));
+		material_geometry tmp5(
+			float3(0.f),
+			1.f,
+			enable_round_corners ? ::state::rounded_corner_normal(roundcorner_radius, across_materials, 1.f) : ::state::normal());
+	} in
+		material(
+			thin_walled: tmp0,
+			surface: tmp1,
+			backface: tmp2,
+			ior: tmp3,
+			volume: tmp4,
+			geometry: tmp5);
+
+export material Tungsten_Sheet_Punched(
+	// Cutout parameters
+
+	uniform cutout_pattern shape_select = pattern_circle //select atlas tile here
+	[[
+		::anno::description("Select a cutout shape."),
+		::anno::display_name("Cutout Shape"),
+		::anno::in_group("Appearance", "Cutout"),
+		::anno::ui_order(0)
+	]],
+	float2 punching_grid_size = float2(.5f, .5f)
+	[[
+		::anno::description("Scales the size of the punching grid."),
+		::anno::display_name("Punching Grid Size"),
+		::anno::in_group("Appearance", "Cutout"),
+		::anno::ui_order(1)
+	]],
+	float cutout_size = .92f
+	[[
+		::anno::description("Scales the size of the cutout pattern independently from the base material."),
+		::anno::display_name("Cutout Size"),
+		::anno::hard_range(0.f, 1.2f),
+		::anno::soft_range(0.f, 1.0f),
+		::anno::in_group("Appearance", "Cutout"),
+		::anno::ui_order(2)
+	]],
+	float cutout_roundness = .4f
+	[[
+		::anno::description("At low values it makes the cutouts sharper. Higher values give the shapes a more rounded look."),
+		::anno::display_name("Cutout Roundness"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::in_group("Appearance", "Cutout"),
+		::anno::ui_order(3)
+	]],
+	float cutout_bevel_width = 0.5f
+	[[
+		::anno::description("Adjusts the width of the bevel transition."),
+		::anno::display_name("Cutout Bevel Width"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::in_group("Appearance", "Cutout"),
+		::anno::ui_order(4)
+	]],
+	float cutout_bump_strength = .8f
+	[[
+		::anno::description("Sets the strength of the bevelled normal around the cutout."),
+		::anno::display_name("Cutout Bevel Strength"),
+		::anno::soft_range(0.0f, 1.0f),
+		::anno::hard_range(0.0f, 2.0f),
+		::anno::in_group("Appearance", "Cutout"),
+		::anno::ui_order(5)
+	]],
+// Grid Layout parameters
+	bool hexagonal_grid = true
+	[[
+		::anno::description("When enabled, the punching will occur on a hexagonal grid, otherwise a square grid."),
+		::anno::display_name("Enable Hexagonal Grid"),
+		::anno::in_group("Appearance", "Cutout Layout"),
+		::anno::ui_order(6)
+	]],
+	float square_grid_offset = 0.0f
+	[[
+		::anno::description("Offsets each row of the grid by a certain amount."),
+		::anno::display_name("Square Grid Offset"),
+		::anno::in_group("Appearance", "Cutout Layout"),
+		::anno::enable_if("hexagonal_grid==false"),
+		::anno::ui_order(7)
+	]],
+	bool horizontal_offset = true
+	[[
+		::anno::description("Choose whether to offset either in row or column direction."),
+		::anno::display_name("Horizontal Offset"),
+		::anno::in_group("Appearance", "Cutout Layout"),
+		::anno::enable_if("hexagonal_grid==false"),
+		::anno::ui_order(8)
+	]],
+
+
+
+// Tungsten Sheet parameters
+	uniform bool infinite_tiling = false [[
+		::anno::description("Enables infinite tiling feature which removes repeating texture patterns. Note that depending on the material this feature changes the appearance of the material slightly."),
+		::anno::display_name("Infinite Tiling"),
+		::anno::in_group("Appearance", "Main")
+	]],
+	float sheet_brightness = 0.5f [[
+		::anno::display_name("Brightness"),
+		::anno::description("Controls the brightness of the material."),
+		::anno::in_group("Appearance", "Main"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	float roughness = 0.2f [[
+		::anno::display_name("Roughness"),
+		::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+		::anno::in_group("Appearance", "Main"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	float streaks = 0.0f [[
+		::anno::display_name("Streaks Weight"),
+		::anno::description("Adds directional streaks that occur as part of the sheet manufacturing process."),
+		::anno::in_group("Appearance", "Main"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	uniform float scratch_bump_factor = 0.0f [[
+		::anno::description("Determines the degree of bumpiness."),
+		::anno::display_name("Bump Factor Streaks"),
+		::anno::in_group("Appearance", "Main"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	float imperfections_amount = 0.6f [[
+		::anno::description("Balances between a perfectly smooth metal and a surface that has various imperfections."),
+		::anno::display_name("Imperfections Amount"),
+		::anno::in_group("Appearance", "Imperfections"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	uniform float impurities_weight_1 = 0.f [[
+		::anno::display_name("Washed Imperfections Ratio"),
+		::anno::in_group("Appearance", "Imperfections"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	uniform float impurities_weight_2 = 0.939f [[
+		::anno::display_name("Noisy Imperfections Ratio"),
+		::anno::in_group("Appearance", "Imperfections"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	uniform float impurities_weight_3 = 0.0 [[
+		::anno::display_name("Splotchy Imperfection Ratio"),
+		::anno::in_group("Appearance", "Imperfections"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	uniform float2 texture_translate = float2(0.f) [[
+		::anno::description("Controls the position of the texture."),
+		::anno::display_name("Texture Translate"),
+		::anno::in_group("Transform")
+	]],
+	uniform float texture_rotate = 0.f [[
+		::anno::description("Rotates angle of the texture in degrees."),
+		::anno::display_name("Texture Rotate"),
+		::anno::in_group("Transform"),
+		::anno::soft_range(0.f, 360.f)
+	]],
+	uniform float2 texture_scale = float2(1.0f) [[
+		::anno::description("Larger numbers increase the size."),
+		::anno::display_name("Texture Scale"),
+		::nvidia::core_definitions::dimension(float2(0.75f, 0.75f)),
+		::anno::in_group("Transform")
+	]],
+	uniform int uv_space_index = 0 [[
+		::anno::display_name("UV Space Index"),
+		::anno::description("Uses selected UV space for material."),
+		::anno::in_group("Transform")
+	]],
+	uniform bool enable_round_corners = false [[
+		::anno::description("Enables the round corner effect. Comes at a slight performance cost as additional raytracing calls are required to evaluate the round corner effect."),
+		::anno::display_name("Enable Round Corners"),
+		::anno::in_group("Round Corners")
+	]],
+	uniform float roundcorner_radius = 0.01f [[
+		::anno::description("Radius of the rounded corners."),
+		::anno::display_name("Round Corner Radius"),
+		::anno::in_group("Round Corners"),
+		::anno::soft_range(0.f, 0.1f)
+	]],
+	uniform bool across_materials = false [[
+		::anno::display_name("Across Materials"),
+		::anno::in_group("Round Corners")
+	]]
+)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Tungsten Sheet - Circular Punch"),
+	::anno::description(DESCRIPTION_PUNCH),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Tungsten_Sheet.Tungsten_Sheet_Punched.png"),
+	::anno::key_words(string[]("metal", "sheet", "tungsten", "imperfections", "new", "unfinished", "reflective", "design", "infinite tiling", "punched", "punching", "circular", "gray"))
+]] = let
+{
+	material base_mat = Tungsten_Sheet(
+		infinite_tiling:        infinite_tiling,
+		sheet_brightness:       sheet_brightness,
+		roughness:              roughness,
+		streaks:                streaks,
+		scratch_bump_factor:    scratch_bump_factor,
+		imperfections_amount:   imperfections_amount,
+		impurities_weight_1:    impurities_weight_1,
+		impurities_weight_2:    impurities_weight_2,
+		impurities_weight_3:    impurities_weight_3,
+		texture_translate:      texture_translate,
+		texture_rotate:         texture_rotate,
+		texture_scale:          texture_scale,
+		uv_space_index:         uv_space_index,
+		enable_round_corners:   enable_round_corners,
+		roundcorner_radius:     roundcorner_radius,
+		across_materials:       across_materials
+	);
+	texture_2d punching_cutout = texture_2d("./textures/atlas_02_norm_dist.png", ::tex::gamma_linear);
+
+	// remap range of slider to avoid artifacts in the bevelling
+	float2 punching_scale = texture_scale * 0.01f * punching_grid_size;
+	float cutout_roundness_ = cutout_roundness*0.6f+0.4f;
+	float cutout_size_lin = (1.0f/cutout_size);
+	float cutout_bevel_width_ = 0.1 + cutout_bevel_width * 0.9f;
+
+	vm_coordinates uv = vm_coord(
+		translation:	texture_translate,
+		rotation:		texture_rotate,
+		scaling:		punching_scale,
+		uv_space:		uv_space_index
+	);
+
+	vm_coordinates punching_uv = hexagonal_grid ? vm_coord_hex(
+		uv:		uv,
+		scale:	cutout_roundness_ * cutout_size_lin
+	) : vm_coord_grid(
+		uv:		vm_coord_rowcol_offset(
+					uv: uv,
+					offset: square_grid_offset,
+					horizontal_offset: horizontal_offset
+				),
+		scale:	cutout_roundness_ * cutout_size_lin
+	);
+	// select the correct subtile from the atlas
+	float4 crop = tile_select(shape_select);
+
+	::base::texture_return lookup = vm_tex_lookup(
+		tex:			punching_cutout,
+		uv:				punching_uv,
+		mono_source:	mono_a,
+		scale:			float4(1.0f),
+		crop_u:			float2(crop.x, crop.y),
+		crop_v:			float2(crop.z, crop.w),
+		wrap_u:			::tex::wrap_clamp,
+		wrap_v:			::tex::wrap_clamp
+	);
+
+	float low = (1.0 - cutout_roundness_);
+	float high = (cutout_size_lin * (cutout_bevel_width_ * 0.2f) *  cutout_roundness_) + (1.0 - cutout_roundness_);
+	// remap x...y to (clamped) 0...1
+	float x = ::math::clamp((lookup.mono - low)/(high - low), 0.0, 1.0);
+	// spherical falloff
+	float falloff=::math::sqrt(1.0-x*x);
+	// masking falloff as the center of the cutout is flat
+	float masked_falloff=falloff<=0.0?1.0:falloff;
+
+	// where base material is still there, use the value of the base material
+	float cutout= ::math::min(falloff<=0.0?0.0:1.0, base_mat.geometry.cutout_opacity);
+
+	// bring in -.5 ... +.5 range and lerp between lookup and flat normal
+	float3 remap_norm = 	::math::lerp(float3(lookup.tint), float3(0.5, 0.5, 1.0), masked_falloff) - float3(0.5);
+	float3 t_norm = ::math::normalize(remap_norm * float3(cutout_bump_strength, cutout_bump_strength, 1.0));
+	
+	float3 rotfix_norm = float3(::math::cos(punching_uv.rotation) * t_norm.x - ::math::sin(punching_uv.rotation) * t_norm.y,
+					::math::sin(punching_uv.rotation) * t_norm.x + ::math::cos(punching_uv.rotation) * t_norm.y,
+					t_norm.z);
+	
+	float3 normal = ::state::texture_tangent_u(punching_uv.uv_space_index) * rotfix_norm.x + 
+					::state::texture_tangent_v(punching_uv.uv_space_index) * rotfix_norm.y + 
+					::state::normal() * rotfix_norm.z;
+
+	float3 final_normal = ::base::blend_normals(
+		base_normal:		normal,
+		base_normal_weight:	1.0f,
+		detail_normal:		base_mat.geometry.normal,
+		detail_normal_weight: 1.0f
+	);
+
+} in material(
+	surface: material_surface(
+		scattering: base_mat.surface.scattering
+	),
+	volume: base_mat.volume,
+	ior: base_mat.ior,
+	thin_walled: true,
+	geometry: material_geometry(
+		displacement: base_mat.geometry.displacement,
+		normal: final_normal,
+		cutout_opacity: cutout
+	)
+);
+
+
+
+// ------------------------ Tungsten Sheet Presets ------------------------
+export material Tungsten_Sheet_Soft_Splotches(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Metal Sheet Tungsten - Soft Splotches"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Tungsten_Sheet.Tungsten_Sheet_Soft_Splotches.png"),
+	::anno::key_words(string[]("metal", "sheet", "tungsten", "imperfections", "new", "unfinished", "reflective", "design", "infinite tiling", "neutral", "gray"))
+]]
+= Tungsten_Sheet(
+	infinite_tiling:		false,
+	sheet_brightness:		0.5f,
+	roughness:				0.3f,
+	streaks:				0.0f,
+	scratch_bump_factor:	0.0f,
+	imperfections_amount:	0.75f,
+	impurities_weight_1:	0.75f,
+	impurities_weight_2:	0.01f,
+	impurities_weight_3:	0.98f,
+	enable_round_corners:	false,
+	roundcorner_radius:		0.01f,
+	across_materials:		false,
+	texture_translate:		float2(0.0f),
+	texture_rotate:			0.0f,
+	texture_scale:			float2(1.0f),
+	uv_space_index:			0
+);
+
+
+
+
+export material Tungsten_Sheet_Matte_Imperfections(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Metal Sheet Tungsten - Matte Imperfections"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Tungsten_Sheet.Tungsten_Sheet_Matte_Imperfections.png"),
+	::anno::key_words(string[]("metal", "sheet", "tungsten", "imperfections", "new", "matte", "unfinished", "reflective", "design", "infinite tiling", "neutral"))
+]]= Tungsten_Sheet(
+	infinite_tiling:		false,
+	sheet_brightness:		0.85f,
+	roughness:				0.75f,
+	streaks:				0.0f,
+	scratch_bump_factor:	0.0f,
+	imperfections_amount:	0.265f,
+	impurities_weight_1:	0.75f,
+	impurities_weight_2:	0.43f,
+	impurities_weight_3:	0.0f,
+	enable_round_corners:	false,
+	roundcorner_radius:		0.01f,
+	across_materials:		false,
+	texture_translate:		float2(0.0f),
+	texture_rotate:			0.0f,
+	texture_scale:			float2(1.0f),
+	uv_space_index:			0
+);
+
+
+
+
+export material Tungsten_Sheet_Glossy_Imperfections(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Metal Sheet Tungsten - Glossy Imperfections"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Tungsten_Sheet.Tungsten_Sheet_Glossy_Imperfections.png"),
+	::anno::key_words(string[]("metal", "sheet", "tungsten", "imperfections", "new", "glossy", "unfinished", "reflective", "design", "infinite tiling", "neutral"))
+]]
+= Tungsten_Sheet(
+	infinite_tiling:		false,
+	sheet_brightness:		0.85f,
+	roughness:				0.3f,
+	streaks:				0.1f,
+	scratch_bump_factor:	0.15f,
+	imperfections_amount:	0.1f,
+	impurities_weight_1:	0.75f,
+	impurities_weight_2:	0.89f,
+	impurities_weight_3:	0.86f,
+	enable_round_corners:	false,
+	roundcorner_radius:		0.01f,
+	across_materials:		false,
+	texture_translate:		float2(0.0f),
+	texture_rotate:			0.0f,
+	texture_scale:			float2(1.0f),
+	uv_space_index:			0
+);
+
+
+
+
+export material Tungsten_Sheet_Splotchy_Streaks(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Metal Sheet Tungsten - Splotchy Streaks"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Tungsten_Sheet.Tungsten_Sheet_Splotchy_Streaks.png"),
+	::anno::key_words(string[]("metal", "sheet", "tungsten", "imperfections", "new", "glossy", "unfinished", "reflective", "design", "infinite tiling", "neutral"))
+]]= Tungsten_Sheet(
+	infinite_tiling:		false,
+	sheet_brightness:		0.85f,
+	roughness:				0.6f,
+	streaks:				0.1f,
+	scratch_bump_factor:	0.2f,
+	imperfections_amount:	0.26f,
+	impurities_weight_1:	1.0f,
+	impurities_weight_2:	0.76f,
+	impurities_weight_3:	0.13f,
+	enable_round_corners:	false,
+	roundcorner_radius:		0.01f,
+	across_materials:		false,
+	texture_translate:		float2(0.0f),
+	texture_rotate:			0.0f,
+	texture_scale:			float2(1.0f),
+	uv_space_index:			0
+);
+
+export material Tungsten_Sheet_Glossy_Streaks(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Metal Sheet Tungsten - Glossy Streaks"),
+	::anno::description(DESCRIPTION),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Tungsten_Sheet.Tungsten_Sheet_Glossy_Streaks.png"),
+	::anno::key_words(string[]("metal", "sheet", "tungsten", "imperfections", "new", "glossy", "unfinished", "reflective", "design", "infinite tiling", "neutral"))
+]]
+= Tungsten_Sheet(
+	infinite_tiling:		false,
+	sheet_brightness:		0.65f,
+	roughness:				0.25f,
+	streaks:				0.8f,
+	scratch_bump_factor:	0.88f,
+	imperfections_amount:	0.86f,
+	impurities_weight_1:	1.0f,
+	impurities_weight_2:	0.75f,
+	impurities_weight_3:	0.125f,
+	enable_round_corners:	false,
+	roundcorner_radius:		0.01f,
+	across_materials:		false,
+	texture_translate:		float2(0.0f),
+	texture_rotate:			0.0f,
+	texture_scale:			float2(1.0f),
+	uv_space_index:			0
+);
+
+// ------------------------ Punched Tungsten Sheet Presets ------------------------
+
+export material Tungsten_Sheet_Punched_Small_Circular(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Tungsten Sheet - Small Circular Punch"),
+	::anno::description(DESCRIPTION_PUNCH),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Tungsten_Sheet.Tungsten_Sheet_Punched_Small_Circular.png"),
+	::anno::key_words(string[]("metal", "sheet", "tungsten", "imperfections", "new", "unfinished", "reflective", "design", "infinite tiling", "punched", "punching", "circular", "gray"))
+]]
+= Tungsten_Sheet_Punched(
+	// Punching Parameters
+	shape_select:           pattern_circle,
+	punching_grid_size:     float2(1.0f),
+	cutout_size:            0.5f,
+	cutout_roundness:       0.4f,
+	cutout_bevel_width:     0.5f,
+	cutout_bump_strength:   0.8f,
+	hexagonal_grid:         true,
+	square_grid_offset:     0.0f,
+	horizontal_offset:      true,
+	
+	// Material Parameters
+	infinite_tiling:		false,
+	sheet_brightness:		0.85f,
+	roughness:				0.3f,
+	streaks:				0.1f,
+	scratch_bump_factor:	0.15f,
+	imperfections_amount:	0.1f,
+	impurities_weight_1:	0.75f,
+	impurities_weight_2:	0.89f,
+	impurities_weight_3:	0.86f,
+	enable_round_corners:	false,
+	roundcorner_radius:		0.01f,
+	across_materials:		false,
+	texture_translate:		float2(0.0f),
+	texture_rotate:			0.0f,
+	texture_scale:			float2(1.0f),
+	uv_space_index:			0
+);
+
+
+export material Tungsten_Sheet_Punched_Hexagonal(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Tungsten Sheet - Hexagonal Punch"),
+	::anno::description(DESCRIPTION_PUNCH),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Tungsten_Sheet.Tungsten_Sheet_Punched_Hexagonal.png"),
+	::anno::key_words(string[]("metal", "sheet", "tungsten", "imperfections", "new", "unfinished", "reflective", "design", "infinite tiling", "punched", "punching", "hexagonal", "gray"))
+]]
+= Tungsten_Sheet_Punched(
+	// Punching Parameters
+	shape_select:           pattern_hexagon,
+	punching_grid_size:     float2(1.5f),
+	cutout_size:            .95f,
+	cutout_roundness:       0.4f,
+	cutout_bevel_width:     0.5f,
+	cutout_bump_strength:   1.5f,
+	hexagonal_grid:         true,
+	square_grid_offset:     0.0f,
+	horizontal_offset:      true,
+	
+	// Material Parameters
+	infinite_tiling:		false,
+	sheet_brightness:		0.85f,
+	roughness:				0.3f,
+	streaks:				0.1f,
+	scratch_bump_factor:	0.15f,
+	imperfections_amount:	0.1f,
+	impurities_weight_1:	0.75f,
+	impurities_weight_2:	0.89f,
+	impurities_weight_3:	0.86f,
+	enable_round_corners:	false,
+	roundcorner_radius:		0.01f,
+	across_materials:		false,
+	texture_translate:		float2(0.0f),
+	texture_rotate:			0.0f,
+	texture_scale:			float2(1.0f),
+	uv_space_index:			0
+);
+
+
+export material Tungsten_Sheet_Punched_Hexagonal_Small(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Tungsten Sheet - Small Hexagonal Punch"),
+	::anno::description(DESCRIPTION_PUNCH),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Tungsten_Sheet.Tungsten_Sheet_Punched_Hexagonal_Small.png"),
+	::anno::key_words(string[]("metal", "sheet", "tungsten", "imperfections", "new", "unfinished", "reflective", "design", "infinite tiling", "punched", "punching", "hexagonal", "gray"))
+]]
+= Tungsten_Sheet_Punched(
+	// Punching Parameters
+	shape_select:           pattern_hexagon,
+	punching_grid_size:     float2(.75f),
+	cutout_size:            .58f,
+	cutout_roundness:       0.4f,
+	cutout_bevel_width:     0.3f,
+	cutout_bump_strength:   1.5f,
+	hexagonal_grid:         true,
+	square_grid_offset:     0.0f,
+	horizontal_offset:      true,
+	
+	// Material Parameters
+	infinite_tiling:		false,
+	sheet_brightness:		0.85f,
+	roughness:				0.3f,
+	streaks:				0.1f,
+	scratch_bump_factor:	0.15f,
+	imperfections_amount:	0.1f,
+	impurities_weight_1:	0.75f,
+	impurities_weight_2:	0.89f,
+	impurities_weight_3:	0.86f,
+	enable_round_corners:	false,
+	roundcorner_radius:		0.01f,
+	across_materials:		false,
+	texture_translate:		float2(0.0f),
+	texture_rotate:			0.0f,
+	texture_scale:			float2(1.0f),
+	uv_space_index:			0
+);
+
+
+export material Tungsten_Sheet_Punched_Square(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Tungsten Sheet - Square Punch"),
+	::anno::description(DESCRIPTION_PUNCH),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Tungsten_Sheet.Tungsten_Sheet_Punched_Square.png"),
+	::anno::key_words(string[]("metal", "sheet", "tungsten", "imperfections", "new", "unfinished", "reflective", "design", "infinite tiling", "punched", "punching", "square", "gray"))
+]]
+= Tungsten_Sheet_Punched(
+	// Punching Parameters
+	shape_select:           pattern_square,
+	punching_grid_size:     float2(1.2f),
+	cutout_size:            0.56f,
+	cutout_roundness:       0.1f,
+	cutout_bevel_width:     0.5f,
+	cutout_bump_strength:   1.5f,
+	hexagonal_grid:         false,
+	square_grid_offset:     0.5f,
+	horizontal_offset:      true,
+	
+	// Material Parameters
+	infinite_tiling:		false,
+	sheet_brightness:		0.85f,
+	roughness:				0.3f,
+	streaks:				0.1f,
+	scratch_bump_factor:	0.15f,
+	imperfections_amount:	0.1f,
+	impurities_weight_1:	0.75f,
+	impurities_weight_2:	0.89f,
+	impurities_weight_3:	0.86f,
+	enable_round_corners:	false,
+	roundcorner_radius:		0.01f,
+	across_materials:		false,
+	texture_translate:		float2(0.0f),
+	texture_rotate:			0.0f,
+	texture_scale:			float2(1.0f),
+	uv_space_index:			0
+);
+
+
+
+export material Tungsten_Sheet_Punched_Line(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Tungsten Sheet - Line Punch"),
+	::anno::description(DESCRIPTION_PUNCH),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Tungsten_Sheet.Tungsten_Sheet_Punched_Line.png"),
+	::anno::key_words(string[]("metal", "sheet", "tungsten", "imperfections", "new", "unfinished", "reflective", "design", "infinite tiling", "punched", "punching", "line", "gray"))
+]]
+= Tungsten_Sheet_Punched(
+	// Punching Parameters
+	shape_select:           pattern_line,
+	punching_grid_size:     float2(1.3f),
+	cutout_size:            0.59f,
+	cutout_roundness:       0.4f,
+	cutout_bevel_width:     0.3f,
+	cutout_bump_strength:   1.5f,
+	hexagonal_grid:         false,
+	square_grid_offset:     0.3333f,
+	horizontal_offset:      true,
+	
+	// Material Parameters
+	infinite_tiling:		false,
+	sheet_brightness:		0.85f,
+	roughness:				0.3f,
+	streaks:				0.1f,
+	scratch_bump_factor:	0.15f,
+	imperfections_amount:	0.1f,
+	impurities_weight_1:	0.75f,
+	impurities_weight_2:	0.89f,
+	impurities_weight_3:	0.86f,
+	enable_round_corners:	false,
+	roundcorner_radius:		0.01f,
+	across_materials:		false,
+	texture_translate:		float2(0.0f),
+	texture_rotate:			0.0f,
+	texture_scale:			float2(1.0f),
+	uv_space_index:			0
+);
+
+
+export material Tungsten_Sheet_Punched_Cross(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Tungsten Sheet - Cross Punch"),
+	::anno::description(DESCRIPTION_PUNCH),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Tungsten_Sheet.Tungsten_Sheet_Punched_Cross.png"),
+	::anno::key_words(string[]("metal", "sheet", "tungsten", "imperfections", "new", "unfinished", "reflective", "design", "infinite tiling", "punched", "punching", "cross", "gray"))
+]]
+= Tungsten_Sheet_Punched(
+	// Punching Parameters
+	shape_select:           pattern_cross,
+	punching_grid_size:     float2(2.0f),
+	cutout_size:            0.59f,
+	cutout_roundness:       0.1f,
+	cutout_bevel_width:     0.44f,
+	cutout_bump_strength:   1.5f,
+	hexagonal_grid:         true,
+	square_grid_offset:     0.0f,
+	horizontal_offset:      true,
+	
+	// Material Parameters
+	infinite_tiling:		false,
+	sheet_brightness:		0.85f,
+	roughness:				0.3f,
+	streaks:				0.1f,
+	scratch_bump_factor:	0.15f,
+	imperfections_amount:	0.1f,
+	impurities_weight_1:	0.75f,
+	impurities_weight_2:	0.89f,
+	impurities_weight_3:	0.86f,
+	enable_round_corners:	false,
+	roundcorner_radius:		0.01f,
+	across_materials:		false,
+	texture_translate:		float2(0.0f),
+	texture_rotate:			0.0f,
+	texture_scale:			float2(1.0f),
+	uv_space_index:			0
+);
+
+
+export material Tungsten_Sheet_Punched_Rhombus(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Tungsten Sheet - Rhombus Punch"),
+	::anno::description(DESCRIPTION_PUNCH),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Tungsten_Sheet.Tungsten_Sheet_Punched_Rhombus.png"),
+	::anno::key_words(string[]("metal", "sheet", "tungsten", "imperfections", "new", "unfinished", "reflective", "design", "infinite tiling", "punched", "punching", "rhombus", "gray"))
+]]
+= Tungsten_Sheet_Punched(
+	// Punching Parameters
+	shape_select:           pattern_rhombus,
+	punching_grid_size:     float2(1.4f),
+	cutout_size:            1.0f,
+	cutout_roundness:       0.8f,
+	cutout_bevel_width:     0.5f,
+	cutout_bump_strength:   1.5f,
+	hexagonal_grid:         true,
+	square_grid_offset:     0.0f,
+	horizontal_offset:      true,
+	
+	// Material Parameters
+	infinite_tiling:		false,
+	sheet_brightness:		0.85f,
+	roughness:				0.3f,
+	streaks:				0.1f,
+	scratch_bump_factor:	0.15f,
+	imperfections_amount:	0.1f,
+	impurities_weight_1:	0.75f,
+	impurities_weight_2:	0.89f,
+	impurities_weight_3:	0.86f,
+	enable_round_corners:	false,
+	roundcorner_radius:		0.01f,
+	across_materials:		false,
+	texture_translate:		float2(0.0f),
+	texture_rotate:			0.0f,
+	texture_scale:			float2(1.0f),
+	uv_space_index:			0
+);
+
+
+export material Tungsten_Sheet_Punched_Triangle(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Tungsten Sheet - Triangle Punch"),
+	::anno::description(DESCRIPTION_PUNCH),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Tungsten_Sheet.Tungsten_Sheet_Punched_Triangle.png"),
+	::anno::key_words(string[]("metal", "sheet", "tungsten", "imperfections", "new", "unfinished", "reflective", "design", "infinite tiling", "punched", "punching", "triangle", "gray"))
+]]
+= Tungsten_Sheet_Punched(
+	// Punching Parameters
+	shape_select:           pattern_triangle,
+	punching_grid_size:     float2(1.3f),
+	cutout_size:            1.08f,
+	cutout_roundness:       1.0f,
+	cutout_bevel_width:     1.0f,
+	cutout_bump_strength:   1.5f,
+	hexagonal_grid:         true,
+	square_grid_offset:     0.0f,
+	horizontal_offset:      true,
+	
+	// Material Parameters
+	infinite_tiling:		false,
+	sheet_brightness:		0.85f,
+	roughness:				0.3f,
+	streaks:				0.1f,
+	scratch_bump_factor:	0.15f,
+	imperfections_amount:	0.1f,
+	impurities_weight_1:	0.75f,
+	impurities_weight_2:	0.89f,
+	impurities_weight_3:	0.86f,
+	enable_round_corners:	false,
+	roundcorner_radius:		0.01f,
+	across_materials:		false,
+	texture_translate:		float2(0.0f),
+	texture_rotate:			0.0f,
+	texture_scale:			float2(1.0f),
+	uv_space_index:			0
+);
+
+
+export material Tungsten_Sheet_Punched_Star(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Rüdiger Raab"),
+	::anno::contributor("Maik Rohland"),
+	::anno::display_name("Tungsten Sheet - Star Punch"),
+	::anno::description(DESCRIPTION_PUNCH),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Tungsten_Sheet.Tungsten_Sheet_Punched_Star.png"),
+	::anno::key_words(string[]("metal", "sheet", "tungsten", "imperfections", "new", "unfinished", "reflective", "design", "infinite tiling", "punched", "punching", "star", "gray"))
+]]
+= Tungsten_Sheet_Punched(
+	// Punching Parameters
+	shape_select:           pattern_star,
+	punching_grid_size:     float2(1.5f),
+	cutout_size:            0.68f,
+	cutout_roundness:       0.5f,
+	cutout_bevel_width:     0.44f,
+	cutout_bump_strength:   1.5f,
+	hexagonal_grid:         true,
+	square_grid_offset:     0.0f,
+	horizontal_offset:      true,
+	
+	// Material Parameters
+	infinite_tiling:		false,
+	sheet_brightness:		0.85f,
+	roughness:				0.3f,
+	streaks:				0.1f,
+	scratch_bump_factor:	0.15f,
+	imperfections_amount:	0.1f,
+	impurities_weight_1:	0.75f,
+	impurities_weight_2:	0.89f,
+	impurities_weight_3:	0.86f,
+	enable_round_corners:	false,
+	roundcorner_radius:		0.01f,
+	across_materials:		false,
+	texture_translate:		float2(0.0f),
+	texture_rotate:			0.0f,
+	texture_scale:			float2(1.0f),
+	uv_space_index:			0
+);

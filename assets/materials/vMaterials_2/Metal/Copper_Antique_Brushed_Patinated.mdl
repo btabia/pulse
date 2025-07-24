@@ -1,0 +1,565 @@
+/******************************************************************************
+ *	 Copyright 2024 NVIDIA Corporation. All rights reserved.
+ ******************************************************************************
+ 
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our 
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL 
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA's Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any 
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR 
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, 
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF 
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+mdl 1.4;
+
+import ::df::*;
+import ::base::*;
+import ::math::*;
+import ::state::*;
+import ::anno::*;
+import ::tex::*;
+import ::nvidia::core_definitions::dimension;
+
+const string COPYRIGHT = 
+" Copyright 2024 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+
+float3 contrast_brightness(
+	float3 input, 
+	float contrast, 
+	float brightness
+)
+[[
+	::anno::unused()
+]]
+{
+	float3 return_value = contrast > 0.5 ?  
+		float3( ::math::clamp((input.x - 0.5) * 1/(1.000001 - (contrast - 0.5)*2.0) + 0.5, 0.0, 1.0) + (brightness - 0.5) * 2.0,
+				::math::clamp((input.y - 0.5) * 1/(1.000001 - (contrast - 0.5)*2.0) + 0.5, 0.0, 1.0) + (brightness - 0.5) * 2.0,
+				::math::clamp((input.z - 0.5) * 1/(1.000001 - (contrast - 0.5)*2.0) + 0.5, 0.0, 1.0) + (brightness - 0.5) * 2.0)
+			:
+		float3( ::math::clamp((input.x - 0.5) * contrast * 2.0 + 0.5 + (brightness - 0.5)*2.0, 0.0, 1.0),
+				::math::clamp((input.y - 0.5) * contrast * 2.0 + 0.5 + (brightness - 0.5)*2.0, 0.0, 1.0),
+				::math::clamp((input.z - 0.5) * contrast * 2.0 + 0.5 + (brightness - 0.5)*2.0, 0.0, 1.0));
+	
+	return return_value;		
+}
+
+float contrast_brightness(
+	float input, 
+	float contrast, 
+	float brightness
+)
+{
+	float return_value = contrast > 0.5 ?  
+		float(::math::clamp((input - 0.5) * 1/(1.000001 - (contrast - 0.5)*2.0) + 0.5, 0.0, 1.0) + (brightness - 0.5) * 2.0)
+			:
+		float(::math::clamp((input - 0.5) * contrast * 2.0 + 0.5 + (brightness - 0.5)*2.0, 0.0, 1.0));
+	
+	return return_value;		
+}
+
+
+uniform float4x4 rotation_translation_scale(
+	uniform float3 rotation = float3(0.)
+		[[ ::anno::description("Rotation applied to every UVW coordinate.") ]],
+	uniform float3 translation = float3(0.)
+		[[ ::anno::description("Offset applied to every UVW coordinate.") ]],
+	uniform float3 scaling = float3(1.)
+		[[ ::anno::description("Scale applied to every UVW coordinate.") ]]
+)
+[[
+	::anno::description("Construct transformation matrix from Euler rotation, translation and scale."),
+	::anno::hidden()
+]]
+{
+	float4x4 scale =
+		float4x4(scaling.x		, 0.			   , 0.			   , 0.,
+				 0.			   , scaling.y		, 0.			   , 0.,
+				 0.			   , 0.			   , scaling.z		, 0.,
+				 translation.x, translation.y, translation.z, 1.);
+
+	float3 s = ::math::sin(rotation);
+	float3 c = ::math::cos(rotation);
+	float4x4 rotate =
+		float4x4(  c.y*c.z ,  -c.x*s.z + s.x*s.y*c.z ,  s.x*s.z + c.x*s.y*c.z , 0.0,
+				   c.y*s.z ,   c.x*c.z + s.x*s.y*s.z , -s.x*c.z + c.x*s.y*s.z , 0.0,
+				  -s.y	 ,   s.x*c.y			   ,  c.x*c.y			   , 0.0,
+				   0.	 ,   0				   ,  0				   , 1.);
+
+	return   scale*rotate;
+}
+
+// remaps a value that lies between low_1 and high_1 to range between low_2 and high_2
+// This is the general case for range remapping
+float remap(float x, float low_1, float high_1, float low_2, float high_2)
+{
+	return low_2 + ((x - low_1) * (high_2 - low_2))/(high_1 - low_1);
+}
+
+
+export material Copper_Antique_Brushed_Patinated (
+	float metal_roughness = 0.4f
+	[[
+		::anno::display_name("Metal Roughness"),
+		::anno::soft_range(float(0.0f), float(1.0f)),
+		::anno::description("The general roughness of the metal. the roughness of the metal will be affected as the ."
+		"parameter 'Patina Amount' is increased"),
+		::anno::in_group("Appearance")
+	]],
+	uniform float patina_metal_blend = .5f
+	[[
+		::anno::display_name("Patina Amount"),
+		::anno::hard_range(float(0.0), float(1.0)),
+		::anno::description("Adjusts how much patina has settled on the copper material ."),
+		::anno::in_group("Appearance")
+	]],
+	uniform float patina_metal_blend_softness = .25f
+	[[
+		::anno::display_name("Patina Transition Softness"),
+		::anno::soft_range(float(0.0), float(1.0)),
+		::anno::hard_range(float(0.0), float(5.0)),
+		::anno::description("Adjusts how soft the fallof between patina and metal is."),
+		::anno::in_group("Appearance")
+	]],
+	uniform float corrosion_offset = .25f
+	[[
+		::anno::display_name("Corrosion Offset"),
+		::anno::soft_range(float(0.0), float(1.0)),
+		::anno::description("Offsets the roughness of the metal, so that it gets earlier glossy as the patina progresses to settle on the material."),
+		::anno::in_group("Appearance")
+	]],
+	float patina_brightness = 0.5f
+	[[
+		::anno::display_name("Patina Brightness"),
+		::anno::soft_range(float(0.0f), float(1.0f)),
+		::anno::description("A control to attenuate the brightness of the patina."),
+		::anno::in_group("Appearance")
+	]],
+	float smudge_amount = 0.0f
+	[[
+		::anno::display_name("Metal Smudge"),
+		::anno::soft_range(float(0.0f), float(1.0f)),
+		::anno::description("Adds glossy smudges on top of the material."),
+		::anno::in_group("Appearance")
+	]],
+	uniform float patina_bump_amount = 0.35f
+	[[
+		::anno::display_name("Patina Bump Amount"),
+		::anno::soft_range(float(0.0f), float(1.0f)),
+		::anno::description("Specifies the intensity of the patina normal texture."),
+		::anno::in_group("Normal")
+	]],
+	uniform float copper_bump_amount = 1.0
+	[[
+		::anno::display_name("Copper Bump Amount"),
+		::anno::description("Specifies the intensity of the normal texture for the underlying copper."),
+		::anno::in_group("Normal")
+	]],
+
+	// Adjustments Group
+	uniform float2 texture_translate =  float2(0.0f)
+	[[
+		::anno::display_name("Translate"),
+		::anno::description("Controls the position of the texture."),
+		::anno::in_group("Adjustments")
+	]],
+	uniform float texture_rotate =  0.f
+	[[
+		::anno::display_name("Rotate"),
+		::anno::description("Rotates angle of the texture in degrees."),
+		::anno::in_group("Adjustments")
+	]],
+	uniform float2 texture_scale =  float2(1.0f)
+	[[
+		::anno::display_name("Scale"),
+		::anno::description("Larger numbers increase the size."),
+		::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+		::anno::in_group("Adjustments")
+	]]
+		
+)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Patinated copper"),
+	::anno::description("A copper material that starts building a patina on top of its surface."),
+	::anno::key_words(string[]("design", "metal", "copper", "antique", "corrosion", "oxidized", "aged", "bumped", "brushed", "scratched", "patina", "green", "rust")),
+	::anno::thumbnail("./.thumbs/Copper_Antique_Brushed_Patinated.Copper_Antique_Brushed_Patinated.png"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::hidden()
+]] = let {
+	float reflection_contrast = 0.25;
+	float patina_brightness_x = patina_brightness * 0.5 + 0.5;
+	
+	float patina_metal_blend_x = patina_metal_blend * 0.4;
+	float patina_metal_blend_softness_x = (patina_metal_blend_softness + 0.001) * 0.12;
+	float corrosion_offset_x = corrosion_offset * 0.15;
+	
+	::base::texture_coordinate_info uvw = ::base::coordinate_source(
+								coordinate_system: ::base::texture_coordinate_uvw,
+								texture_space: 0
+	);
+	
+	::base::texture_coordinate_info  transformed_uvw =  ::base::transform_coordinate(
+								transform: rotation_translation_scale(
+									scaling: float3(1.0f/texture_scale.x, 1.0f/texture_scale.y, 1.0),
+									rotation: float3(0.0, 0.0, texture_rotate/180.*::math::PI ),
+									translation: float3(texture_translate.x, texture_translate.y, 0.0)
+								),
+								coordinate: uvw
+	);
+	
+	::base::texture_coordinate_info  patina_uvw =  ::base::transform_coordinate(
+								transform: rotation_translation_scale(
+									scaling: float3(1.0f/(texture_scale.x*2.0f), 1.0f/(texture_scale.y*2.0f), 1.0),
+									rotation: float3(0.0, 0.0, texture_rotate/180.*::math::PI ),
+									translation: float3(texture_translate.x, texture_translate.y, 0.0)
+								),
+								coordinate: uvw
+	);
+	
+	// Diffuse Color lookup
+	color diffuse_color = ::base::file_texture(
+							texture: texture_2d("./textures/brushed_antique_copper_diff.jpg" , ::tex::gamma_srgb),
+							color_offset: color(0.0, 0.0, 0.0),
+							color_scale: color(1.0, 1.0, 1.0),
+							mono_source: ::base::mono_average,
+							uvw: transformed_uvw,
+							clip: false		
+	).tint;
+	
+	// Patina diffuse color
+	::base::texture_return patina_diffuse_color = ::base::file_texture(
+							texture: texture_2d("./textures/copper_patina_diff.jpg" , ::tex::gamma_srgb),
+							color_offset: color(0.0, 0.0, 0.0),
+							color_scale: color(1.0, 1.0, 1.0),
+							mono_source: ::base::mono_average,
+							uvw: patina_uvw,
+							clip: false		
+	);
+	
+	// Patina normal
+	float3 patina_bump = ::base::tangent_space_normal_texture(
+											texture: texture_2d("./textures/copper_patina_norm.jpg" , ::tex::gamma_linear),
+											factor:		 patina_bump_amount,
+											uvw:			transformed_uvw,
+											flip_tangent_u: false,
+											flip_tangent_v: false
+	);
+	
+	color final_diffuse_color = diffuse_color;
+
+	float roughness_lookup = ::math::clamp(contrast_brightness(
+						::tex::lookup_float(
+							tex: texture_2d("./textures/brushed_antique_copper_rough.jpg" , ::tex::gamma_linear),
+							coord: float2(uvw.position.x, uvw.position.y)),
+						reflection_contrast,	// contrast
+						metal_roughness	// brightness
+	) +  ::base::file_texture(
+							texture: texture_2d("./textures/brushed_antique_copper_smudge_map.jpg" , ::tex::gamma_linear),
+							color_offset: color(0.0, 0.0, 0.0),
+							color_scale: color(smudge_amount * .5f),
+							mono_source: ::base::mono_average,
+							uvw: transformed_uvw,
+							clip: false		
+	).mono, 0.0f, 1.0f) 
+	+ ::math::clamp(remap(patina_diffuse_color.mono, 
+						patina_metal_blend_x - patina_metal_blend_softness_x - corrosion_offset_x, 
+						patina_metal_blend_x + patina_metal_blend_softness_x + corrosion_offset_x,
+						1.0,
+						0.0), 0.0, 1.0);
+	
+	
+	// Specular Level lookup
+	float specular_level = ::base::file_texture(
+							texture: texture_2d("./textures/brushed_antique_copper_ref.jpg" , ::tex::gamma_linear),
+							color_offset: color(0.0, 0.0, 0.0),
+							color_scale: color(1.0, 1.0, 1.0),
+							mono_source: ::base::mono_average,
+							uvw: transformed_uvw,
+							clip: false		
+	).mono;
+	
+	
+	// Metallic compositing
+	float metallic = 1.0f;
+	
+	
+	// Patina
+	bsdf patina_bsdf = ::df::diffuse_reflection_bsdf(
+		roughness: 0.0f,  			//assign the user controllable
+		tint: patina_diffuse_color.tint * patina_brightness_x	//values to the bsdf
+	);
+	
+	
+	bsdf diffuse_bsdf = ::df::diffuse_reflection_bsdf(
+		roughness: 0.0f,  			//assign the user controllable
+		tint: final_diffuse_color	//values to the bsdf
+	);
+	
+	bsdf ggx_smith_bsdf = ::df::microfacet_ggx_smith_bsdf(
+		roughness_u: roughness_lookup*roughness_lookup,
+		roughness_v: roughness_lookup*roughness_lookup,
+		tint: color(1.0, 1.0, 1.0),
+		mode: ::df::scatter_reflect
+	);
+
+	
+	bsdf custom_curve_layer_bsdf = ::df::custom_curve_layer(
+		normal_reflectivity: 0.08 * specular_level,		
+		grazing_reflectivity: 1.0,
+		exponent:	3.0,
+		weight:		1.0,
+		layer: ggx_smith_bsdf,
+		base:	diffuse_bsdf
+	);
+	
+	bsdf directional_factor_bsdf = ::df::directional_factor(
+		normal_tint:  final_diffuse_color,
+		grazing_tint: color(1.0, 1.0, 1.0),
+		exponent: 3.0f,
+		base: ggx_smith_bsdf
+	);
+	
+	bsdf pre_final_bsdf = ::df::weighted_layer(
+		base:	custom_curve_layer_bsdf,
+		weight: metallic,
+		layer:	directional_factor_bsdf
+	);
+	
+	bsdf final_bsdf = ::df::weighted_layer(
+		base:	pre_final_bsdf,
+		weight: remap(patina_diffuse_color.mono, 
+					patina_metal_blend_x - patina_metal_blend_softness_x,
+					patina_metal_blend_x + patina_metal_blend_softness_x,
+					1.0,
+					0.0),
+		layer:	patina_bsdf,
+		normal: patina_bump
+	);
+	
+	// Normal lookup
+	float3 bump = ::base::tangent_space_normal_texture(
+											texture: texture_2d("./textures/brushed_antique_copper_norm.jpg" , ::tex::gamma_linear),
+											factor:		 copper_bump_amount,
+											uvw:			transformed_uvw,
+											flip_tangent_u: false,
+											flip_tangent_v: false
+	);
+
+	
+} in material (
+	surface: material_surface(
+		scattering: final_bsdf
+
+	),
+	geometry: material_geometry(
+		normal: bump
+	)
+);
+
+
+
+export material Copper_Antique_Brushed_Minimal_Patina(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Copper - Minimal Patina"),
+	::anno::description("A copper material that starts building a patina on top of its surface."),
+	::anno::key_words(string[]("design", "metal", "copper", "antique", "corrosion", "oxidized", "aged", "bumped", "brushed", "scratched", "patina", "green", "rust")),
+	::anno::thumbnail("./.thumbs/Copper_Antique_Brushed_Patinated.Copper_Antique_Brushed_Minimal_Patina.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] 
+ = Copper_Antique_Brushed_Patinated(
+	metal_roughness:			0.4f,
+	patina_metal_blend:			0.2f,
+	patina_metal_blend_softness:0.5f,
+	corrosion_offset:			0.2f,
+	patina_brightness:			0.75f,
+	smudge_amount:				0.0f,
+	patina_bump_amount:			0.35f,
+	copper_bump_amount:			1.0f
+ );
+ 
+ 
+export material Copper_Antique_Brushed_Slight_Patina(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Copper - Slight Patina"),
+	::anno::description("A copper material that starts building a patina on top of its surface."),
+	::anno::key_words(string[]("design", "metal", "copper", "antique", "corrosion", "oxidized", "aged", "bumped", "brushed", "scratched", "patina", "green", "rust")),
+	::anno::thumbnail("./.thumbs/Copper_Antique_Brushed_Patinated.Copper_Antique_Brushed_Slight_Patina.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] 
+ = Copper_Antique_Brushed_Patinated(
+	metal_roughness:			0.4f,
+	patina_metal_blend:			0.3f,
+	patina_metal_blend_softness:0.5f,
+	corrosion_offset:			0.2f,
+	patina_brightness:			0.75f,
+	smudge_amount:				0.0f,
+	patina_bump_amount:			0.35f,
+	copper_bump_amount:			1.0f
+ );
+ 
+export material Copper_Antique_Brushed_Slight_Patina_Spots(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Copper - Slight Patina Spots"),
+	::anno::description("A copper material that starts building a patina on top of its surface."),
+	::anno::key_words(string[]("design", "metal", "copper", "antique", "corrosion", "oxidized", "aged", "bumped", "brushed", "scratched", "patina", "green", "rust")),
+	::anno::thumbnail("./.thumbs/Copper_Antique_Brushed_Patinated.Copper_Antique_Brushed_Slight_Patina_Spots.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] 
+ = Copper_Antique_Brushed_Patinated(
+	metal_roughness:			0.5f,
+	patina_metal_blend:			0.38f,
+	patina_metal_blend_softness:0.1f,
+	corrosion_offset:			0.1f,
+	patina_brightness:			0.8f,
+	smudge_amount:				0.0f,
+	patina_bump_amount:			0.7f,
+	copper_bump_amount:			1.0f
+ );
+
+ 
+export material Copper_Antique_Brushed_Medium_Patina(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Copper - Medium Patina"),
+	::anno::description("A copper material that starts building a patina on top of its surface."),
+	::anno::key_words(string[]("design", "metal", "copper", "antique", "corrosion", "oxidized", "aged", "bumped", "brushed", "scratched", "patina", "green", "rust")),
+	::anno::thumbnail("./.thumbs/Copper_Antique_Brushed_Patinated.Copper_Antique_Brushed_Medium_Patina.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] 
+ = Copper_Antique_Brushed_Patinated(
+	metal_roughness:			0.4f,
+	patina_metal_blend:			0.4f,
+	patina_metal_blend_softness:0.5f,
+	corrosion_offset:			0.2f,
+	patina_brightness:			0.75f,
+	smudge_amount:				0.0f,
+	patina_bump_amount:			0.35f,
+	copper_bump_amount:			1.0f
+ );
+
+ 
+export material Copper_Antique_Brushed_Strong_Patina(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Copper - Strong Patina"),
+	::anno::description("A copper material that starts building a patina on top of its surface."),
+	::anno::key_words(string[]("design", "metal", "copper", "antique", "corrosion", "oxidized", "aged", "bumped", "brushed", "scratched", "patina", "green", "rust")),
+	::anno::thumbnail("./.thumbs/Copper_Antique_Brushed_Patinated.Copper_Antique_Brushed_Strong_Patina.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] 
+ = Copper_Antique_Brushed_Patinated(
+	metal_roughness:			0.4f,
+	patina_metal_blend:			0.5f,
+	patina_metal_blend_softness:0.6f,
+	corrosion_offset:			0.2f,
+	patina_brightness:			0.75f,
+	smudge_amount:				0.0f,
+	patina_bump_amount:			0.35f,
+	copper_bump_amount:			1.0f
+ );
+
+ 
+export material Copper_Antique_Brushed_Very_Strong_Patina(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Copper - Very Strong Patina"),
+	::anno::description("A copper material that starts building a patina on top of its surface."),
+	::anno::key_words(string[]("design", "metal", "copper", "antique", "corrosion", "oxidized", "aged", "bumped", "brushed", "scratched", "patina", "green", "rust")),
+	::anno::thumbnail("./.thumbs/Copper_Antique_Brushed_Patinated.Copper_Antique_Brushed_Very_Strong_Patina.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] 
+ = Copper_Antique_Brushed_Patinated(
+	metal_roughness:			0.5f,
+	patina_metal_blend:			0.55f,
+	patina_metal_blend_softness:0.4f,
+	corrosion_offset:			0.2f,
+	patina_brightness:			0.75f,
+	smudge_amount:				0.0f,
+	patina_bump_amount:			0.35f,
+	copper_bump_amount:			1.0f
+ );
+
+export material Copper_Antique_Brushed_Pure_Patina(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Copper - Pure Patina"),
+	::anno::description("A copper material that starts building a patina on top of its surface."),
+	::anno::key_words(string[]("design", "metal", "copper", "antique", "corrosion", "oxidized", "aged", "bumped", "brushed", "scratched", "patina", "green", "rust")),
+	::anno::thumbnail("./.thumbs/Copper_Antique_Brushed_Patinated.Copper_Antique_Brushed_Pure_Patina.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] 
+ = Copper_Antique_Brushed_Patinated(
+	metal_roughness:			0.5f,
+	patina_metal_blend:			1.0f,
+	patina_metal_blend_softness:0.4f,
+	corrosion_offset:			0.2f,
+	patina_brightness:			0.75f,
+	smudge_amount:				0.0f,
+	patina_bump_amount:			0.44f,
+	copper_bump_amount:			1.0f
+ );
+
+
+ 
+ // ---------------------------
+ 
+export material Copper_Antique_Brushed_Crusted_Patina(*)
+[[
+	::anno::author("NVIDIA vMaterials"),
+	::anno::display_name("Copper - Pure Crusted Patina"),
+	::anno::description("A copper material that starts building a patina on top of its surface."),
+	::anno::key_words(string[]("design", "metal", "copper", "antique", "corrosion", "oxidized", "aged", "bumped", "brushed", "scratched", "patina", "green", "rust")),
+	::anno::thumbnail("./.thumbs/Copper_Antique_Brushed_Patinated.Copper_Antique_Brushed_Crusted_Patina.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] 
+ = Copper_Antique_Brushed_Patinated(
+	metal_roughness:			0.5f,
+	patina_metal_blend:			1.0f,
+	patina_metal_blend_softness:0.4f,
+	corrosion_offset:			0.2f,
+	patina_brightness:			0.75f,
+	smudge_amount:				0.0f,
+	patina_bump_amount:			1.0f,
+	copper_bump_amount:			1.0f
+ );
+
+
+

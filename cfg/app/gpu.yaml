@@ -1,0 +1,21 @@
+---
+app: 
+  headless: True
+  hide_ui: False
+  gpu: True
+  active_gpu: ${oc.decode:${oc.env:CUDA_DEVICE}}
+  physics_gpu: ${oc.decode:${oc.env:CUDA_DEVICE}}
+  multi_gpu: False 
+  anti_aliasing: False
+  physics_context:
+    prim_path: "/World/PhysicsScene"
+    set_defaults: False
+    #device: "cpu" #"cuda:${oc.decode:${oc.env:CUDA_DEVICE}}"
+    #backend: "numpy"
+  world:
+    physics_freq: 300
+    rendering_freq: 300
+    stage_unit_in_meters: 1
+    set_defaults: False
+    device: "cuda:${oc.decode:${oc.env:CUDA_DEVICE}}" #"cuda:${oc.decode:${oc.env:CUDA_DEVICE}}"
+    backend: "numpy"

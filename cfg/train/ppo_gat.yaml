@@ -1,0 +1,58 @@
+---
+RL:
+  policy: PPO
+  max_timestep: 1600000
+  headless: True
+  disable_progressbar: True
+  checkpoint:
+    saving_freq: 50000
+    base_directory: "./training_data/"
+  vision_h: 64
+  vision_w: 64
+  tool_num_obs: 14
+  
+  algo:
+    activation: "relu"
+    arch: [128,128]
+    type: "PPO" 
+    feature_extractor: "GAT"
+    lstm: False
+    rollouts: 4096
+    learning_epochs: 10
+    mini_batch_size: 128
+    discount_factor: 0.99
+    lambda: 0.95
+    learning_rate: 1.25e-3
+    learning_rate_scheduler: KLAdaptiveRL
+    kl_threshold: 0.01606212214144783
+    kl_threshold_stop: 0.0
+    lr_gamma: 0.97
+    max_lr: 1e-3
+    min_lr: 1e-6
+    grad_norm_clip: 0.6409569131074955
+    ratio_clip: 0.20
+    value_clip: 0.20
+    clip_predicted_values: False
+    entropy_loss_scale: 0
+    value_loss_scale: 0.7763610171685781
+    state_preprocessor: RunningStandardScaler
+    value_preprocessor: RunningStandardScaler
+    device: "cuda:${oc.env:CUDA_DEVICE}"
+    tensorboard_log: "./training_data/"
+
+  experiment: 
+    directory: "./training_data/"
+    experiment_name: ""
+    write_interval: 512 # Not used, we use the rollout value instead
+    checkpoint_interval: 1000
+    store_separately: False
+    wandb: True 
+    wandb_kwargs: 
+      project: malleabot_ppo
+      mode: online
+      monitor_gym: True
+      sync_tensorboard: True
+
+
+
+

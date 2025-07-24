@@ -1,0 +1,48 @@
+---
+RL:
+  policy: SAC
+  max_timestep: 50000
+  headless: True
+  disable_progressbar: True
+  checkpoint:
+    saving_freq: 50000
+    base_directory: "./training_data/"
+  vision_h: 32
+  vision_w: 32
+  tool_num_obs: 14
+  
+  algo:
+    arch: [512,256,128]
+    activation: "relu"
+    type: "SAC"
+    gradient_steps : 1
+    batch_size : 256
+    discount_factor : 0.99
+    polyak : 0.005
+    actor_learning_rate : 0.0005
+    critic_learning_rate : 0.0005
+    random_timesteps : 0
+    learning_starts : 10000
+    grad_norm_clip : 0
+    learn_entropy : True
+    entropy_learning_rate : 1e-3
+    initial_entropy_value : 0.2
+    mixed_precision : False
+    buffer_size: 1000000
+    device : "cuda:${oc.env:CUDA_DEVICE}"
+
+
+
+  experiment: 
+    directory: "./training_data/"
+    experiment_name: ""
+    write_interval: 1000 # Not used, we use the rollout value instead
+    checkpoint_interval: 10000
+    store_separately: False
+    wandb: True 
+    wandb_kwargs: 
+      project: malleabot_sac
+      mode: online
+      monitor_gym: True
+      sync_tensorboard: True
+

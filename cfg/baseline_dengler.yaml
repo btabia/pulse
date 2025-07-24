@@ -1,0 +1,15 @@
+---
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+    
+defaults:
+    - train: tqc # default/ppo/tqc/sac
+    - wandb: baseline_dengler
+    - hydra: defaults
+    - app: lab_app
+    - env: baseline
+    - tasks: baseline
+    - play: baseline
+
