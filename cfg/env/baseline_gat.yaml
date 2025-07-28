@@ -5,8 +5,9 @@ name: "BaseEnv-v0"
 
 env_cfg: 
   env_path: "/home/btabia/git/new/Malleabot/assets/env_setup/env_ycb.usd"
-  decimation: 15 # skip frame
-  decimation_cmd: 1
+  decimation: 20 # skip frame
+  decimation_cmd: 20
+  decimation_ctrl: 1
   episode_length_s : 25
   action_scale : [0.025, 0.025, 20] #Dx, Dy, Dtheta
   feature_extractor: 
@@ -22,7 +23,7 @@ env_cfg:
   device: "cpu" #"cuda:${oc.decode:${oc.env:CUDA_DEVICE}}"
   seed: 42
 simulation_cfg:
-  freq: 150
+  freq: 300
   use_fabric: False
   enable_gpu_dynamics: True
   solver_type: "TGS"

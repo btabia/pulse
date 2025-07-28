@@ -15,6 +15,7 @@ import numpy as np
 from isaaclab.envs import DirectRLEnv, DirectRLEnvCfg
 from lab_tasks.basetask import Basetask
 from lab_tasks.baseline_zhang import BaselineZhang
+from lab_tasks.baseline_soft import BaselineSoft
 from lab_tasks.gatpush import GatPush
 from typing import Any, ClassVar
 from isaacsim.core.api.loggers import DataLogger
@@ -26,6 +27,8 @@ from lab_tasks.basetask import Basetask
 def get_task(cfg):
     if cfg["task"]["name"] == "baseline_zhang":
         task = BaselineZhang(cfg = cfg) 
+    elif cfg["task"]["name"] == "baseline_soft":
+        task = BaselineSoft(cfg = cfg)
     elif cfg["task"]["name"] == "gatpush":
         task = GatPush(cfg = cfg) 
     else: 
@@ -67,7 +70,7 @@ class BaseEnv(DirectRLEnv):
             self.spaces = {
             "point_cloud": spaces.Box(low = -float("inf"), high = float("inf"), shape = (self.cfg_env["env_cfg"]["feature_extractor"]["shape"] + 1,3), dtype= np.float32),
             "edge_index": spaces.Box(low = -float("inf"), high = float("inf"), shape = (2, self.cfg_env["env_cfg"]["feature_extractor"]["shape"] * (self.cfg_env["env_cfg"]["feature_extractor"]["k_neighbour"] + self.cfg_env["env_cfg"]["feature_extractor"]["virtual_node_link"])), dtype= np.int32),
-            #"edge_attribute": spaces.Box(low = -float("inf"), high = float("inf"), shape = ( self.cfg_env["env_cfg"]["feature_extractor"]["shape"] * (self.cfg_env["env_cfg"]["feature_extractor"]["k_neighbour"] + self.cfg_env["env_cfg"]["feature_extractor"]["virtual_node_link"]), 3), dtype= np.float32),
+            "edge_attribute": spaces.Box(low = -float("inf"), high = float("inf"), shape = ( self.cfg_env["env_cfg"]["feature_extractor"]["shape"] * (self.cfg_env["env_cfg"]["feature_extractor"]["k_neighbour"] + self.cfg_env["env_cfg"]["feature_extractor"]["virtual_node_link"]), 1), dtype= np.float32),
             "tool": spaces.Box(low = -float("inf"), high = float("inf"), shape = (self.cfg_env["env_cfg"]["tool_num_obs"],), dtype= np.float32),
             }
         elif self.cfg_env["env_cfg"]["feature_extractor"]["type"] == "None": 

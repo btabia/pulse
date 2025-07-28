@@ -310,8 +310,6 @@ class BaselineSoft(Basetask):
         self.target_position = self.reset_target_position()
         self.target_lists = self.dvision.generate_target_points(self.target_position, init_radius = 0.02)
 
-        
-        self.obj_manager.remove_object_from_work_table(self.obj_prim)
         self.ee_jacobi_idx = 7
         joint_ids = [0, 1, 2, 3, 4, 5, 6]
         body_ids = 8
@@ -332,23 +330,19 @@ class BaselineSoft(Basetask):
             self.scene.update(1/self.cfg["task"]["freq"])
         
         self.obj_manager.randomize_properties()
-        self.reset_rigid_object_position(self.obj_prim, self.init_cmd[:,0:2], self.target_position[:,0:2])
+        self.reset_particles_position(self.particle_prim, self.initial_particle_pos, self.init_cmd[:,0:2], self.target_position[:,0:2])
         self.obj_manager.randomize_surface_friction()
         self.sim.step()
         self.scene.update(1/self.cfg["task"]["freq"])
 
-        
-
+    
         self.robot_entity_cfg = SceneEntityCfg("robot", joint_names=["joint_.*"], body_names=["end_effector_link"])
         self.robot_entity_cfg.resolve(self.scene)
 
         # read robot state
         ee_pose = self.robot.data.body_state_w[:, self.robot_entity_cfg.body_ids[0], 0:7].clone().to(self.device)
         ee_position = ee_pose[:,0:2]
-        #self.ee_ftarget_dist_init = th.norm(ee_position - self.fixed_target)
-        #ee_orientation_rad = euler_xyz_from_quat(ee_pose[:,3:7])
-        #ee_orientation_rad = th.tensor([ee_orientation_rad[0], ee_orientation_rad[1], ee_orientation_rad[2]], device=self.device)
-        
+
         self.robot.reset()
         self.ik_controller.reset()
 
@@ -422,7 +416,7 @@ class BaselineSoft(Basetask):
         from isaaclab.utils.math import quat_from_euler_xyz
         from isaaclab.utils.math import euler_xyz_from_quat
 
-        self._obj_pos, _ = self.obj_prim.get_world_poses()
+        #self._obj_pos, _ = self.obj_prim.get_world_poses()
 
         # read simulation time for control
         ee_pose = self.robot.data.body_state_w[:, self.robot_entity_cfg.body_ids[0], 0:7].clone().to(self.device)
@@ -433,7 +427,7 @@ class BaselineSoft(Basetask):
         self.logging_data = {
                 "episode": self.episode_cpt,
                 "brush_position": ee_pose[:,0:3].squeeze(dim=0).cpu().numpy().tolist(),
-                "debris_position": self._obj_pos[:,0:2].squeeze(dim=0).cpu().numpy().tolist(),
+                #"debris_position": self._obj_pos[:,0:2].squeeze(dim=0).cpu().numpy().tolist(),
                 "target_position": self.target_position.squeeze(dim=0).cpu().numpy().tolist(),
                 "contact_force": ee_efforts_obs.cpu().numpy().tolist(),
             }
@@ -478,9 +472,7 @@ class BaselineSoft(Basetask):
         dist_c = - self.dist_normalized(0, self.particle_target_dist_init, self.particle_target_dist)
         dist_d = - self.dist_normalized(0, self.ee_ftarget_dist_init, self.target_fpart_dist)
         reward[0] =  dist_a + dist_c + dist_d
-        #print("dist a reward: " + str(dist_a))
-        #print("dist b reward: " + str(dist_b))
-        #print("dist c reward: " + str(dist_c))
+
         
         if self.good_reach == True:
             reward[0] = 50

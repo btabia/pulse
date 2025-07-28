@@ -270,7 +270,7 @@ class GatPush(Basetask):
         obs = {
             "point_cloud": structured_graph.x,
             "edge_index": structured_graph.edge_index,
-            #"edge_attribute": structured_graph.edge_attr,
+            "edge_attribute": structured_graph.edge_attr,
             "tool": tool_obs,
         }
         return {"policy": obs}

@@ -352,8 +352,11 @@ class Dvision:
         structured_graph = transform(structured_graph)
         structured_graph.x[4096] = ee_position[[0]].to(self.device)
 
+        # we add the edge attributes
+        edge_attributes = th.ones((structured_graph.edge_index.shape[1], 1), device=self.device)
 
-        structured_graph = Data(x = structured_graph.x, edge_index = structured_graph.edge_index)
+
+        structured_graph = Data(x = structured_graph.x, edge_index = structured_graph.edge_index, edge_attr = edge_attributes)
 
         # provide the relative cartesian difference of position between each nodes
         #transform = T.Compose([Cartesian(norm = False)])

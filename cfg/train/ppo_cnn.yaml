@@ -1,8 +1,8 @@
 ---
 RL:
   policy: PPO
-  max_timestep: 150000
-  max_timestep_eval: 150000
+  max_timestep: 2500000
+  max_timestep_eval: 2500000
   headless: True
   disable_progressbar: True
   checkpoint:
@@ -10,7 +10,7 @@ RL:
     base_directory: "./training_data/"
   vision_h: 64
   vision_w: 64
-  tool_num_obs: 7
+  tool_num_obs: 9
   load_policy: False
   load_policy_path: "/home/btabia/git/new/Malleabot/training_data/25-06-02_21-59-29-384769_PPO/checkpoints/best_agent.pt"
   seed: 42

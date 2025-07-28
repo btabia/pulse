@@ -5,11 +5,11 @@ hydra:
     dir: .
     
 defaults:
-    - train: ppo_cnn_baseline # default/ppo/tqc/sac
-    - wandb: baseline_cnn_ppo
+    - train: ppo_cnn
+    - wandb: baseline_soft
     - hydra: defaults
     - app: lab_app
     - env: baseline_cnn_soft
-    - tasks: baseline_zhang
+    - tasks: baseline_soft
     - play: baseline_ppo
 

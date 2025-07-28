@@ -1,8 +1,0 @@
-# set the directory where the output files get saved
-setup:
-    project: baseline_cnn_ppo
-    entity:
-    mode: online
-watch:
-    log: all
-    log_freq: 100

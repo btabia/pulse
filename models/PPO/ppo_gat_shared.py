@@ -143,6 +143,8 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
             space = self.tensor_to_space(states, self.observation_space)
             point_cloud = space["point_cloud"]
             edge_index = space["edge_index"]
+            edge_attr = space["edge_attribute"]
+
             point_cloud.to(self.device)
             edge_index.to(self.device)
             #edge_attr.to(self.device)
@@ -154,16 +156,30 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
             tool_obs = space["tool"]
             tool_obs.to(self.device)
             
-            data_list = [Data(x=point_cloud[i], edge_index=edge_index[i]) for i  in range(states.shape[0])] 
-            loader = DataLoader(data_list, batch_size = states.shape[0])
-            batch = next(iter(loader))
 
-            x = self.gat_conv_1(x = batch.x , edge_index = batch.edge_index)
+
+            # set the edges to zero between the point cloud and the tool and one within the point cloud
+            edge_attributes_1 = torch.zeros((batch.edge_index.shape[1], 1), device=self.device)
+            edge_attributes_2 = torch.zeros((batch.edge_index.shape[1], 1), device=self.device)
+            edge_attributes_1[0:((4096*4)-1)] = edge_attr[0:((4096*4)-1)]
+            edge_attributes_2[4096:] = edge_attr[4096:]
+
+            data_list_1 = [Data(x=point_cloud[i], edge_index=edge_index[i], edge_attr = edge_attributes_1) for i  in range(states.shape[0])] 
+            loader_1 = DataLoader(data_list_1, batch_size = states.shape[0])
+            batch_1 = next(iter(loader_1))
+
+            data_list_2 = [Data(x=point_cloud[i], edge_index=edge_index[i], edge_attr = edge_attributes_2) for i  in range(states.shape[0])] 
+            loader_2 = DataLoader(data_list_2, batch_size = states.shape[0])
+            batch_2 = next(iter(loader_2))
+
+
+            # set the edges attributes to zero between the point cloud and the tool and one within the point cloud
+            x = self.gat_conv_1(x = batch_1.x , edge_index = batch_1.edge_index, edge_attr = batch_1.edge_attr)
             x = F.elu(x)
-            x = self.gat_conv_2(x = x, edge_index = batch.edge_index)
+            # set the edges to one between the point cloud and the tool and zero within the point cloud
+            x = self.gat_conv_2(x = x, edge_index = batch.edge_index, edge_attr = batch_2.edge_attr)
             x = F.elu(x) 
-            x = self.gat_conv_3(x = x, edge_index = batch.edge_index)
-            x = F.elu(x) 
+
             
             x = x.view(states.shape[0], 4097, -1)
                
@@ -203,9 +219,7 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
                 x = F.elu(x)
                 x = self.gat_conv_2(x = x, edge_index = batch.edge_index)
                 x = F.elu(x) 
-                x = self.gat_conv_3(x = x, edge_index = batch.edge_index)
-                x = F.elu(x) 
-                
+ 
                 x = x.view(states.shape[0], 4097, -1)
                 
                 x = self.point_aggregation(x)

@@ -1,7 +1,7 @@
 ---
 
 task: 
-  name: baseline_zhang
+  name: baseline_soft
   target_prim_path: "/World/Target"
   play: False
   perf_log_path: "./performance_data/"
@@ -49,7 +49,7 @@ task:
   
   init: 
     delay: 30
-    randomize: False
+    randomize: True
     robot_dx: 0.10
     robot_dy: 0.10
     debris_dx: 0.10
@@ -58,9 +58,9 @@ task:
     target_dy: 0.10
     debris_target_min_dist: 0.1
     brush_orientation: [0,0,0]
-    target: [0.65, -0.1, 0.0] #[0.75, 0, 0.0]
-    medium: [0.65, 0.15, 0.0] #[0.75, 0, 0.0] 
-    robot: [0.65, 0.20, 0.15] #[0.75,0,0.15]
+    target: [0.75, 0, 0.0]
+    medium: [0.75, 0, 0.0] 
+    robot: [0.75,0,0.15]
     centre: [0.8,0]
     debris_brush_min_dist: 8
     marker_prim_path: "/World/Visuals/Target"
