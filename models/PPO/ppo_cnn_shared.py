@@ -53,17 +53,21 @@ class Shared_PPO_CNN(GaussianMixin, DeterministicMixin, Model):
         self.obs_feature_size = self.num_robot_obs + 32
 
         self.policy_layer = nn.Sequential(
-            nn.Linear(self.obs_feature_size, 128, device=self.device), 
+            nn.Linear(self.obs_feature_size, 512, device=self.device), 
             nn.ReLU(),
-            nn.Linear(128, 128, device=self.device), 
+            nn.Linear(512, 256, device=self.device), 
+            nn.ReLU(),
+            nn.Linear(256, 128, device=self.device), 
             nn.ReLU(),
             nn.Linear(128, self.num_actions, device=self.device), 
         )
 
         self.value_layer = nn.Sequential(
-            nn.Linear(self.obs_feature_size, 128, device=self.device), 
+            nn.Linear(self.obs_feature_size, 512, device=self.device), 
             nn.ReLU(),
-            nn.Linear(128, 128, device=self.device), 
+            nn.Linear(512, 256, device=self.device), 
+            nn.ReLU(),
+            nn.Linear(256, 128, device=self.device), 
             nn.ReLU(),
             nn.Linear(128, 1, device=self.device), 
         )
