@@ -223,6 +223,10 @@ class Dvision:
         target_fpart_dist = th.norm((target_fpart_pos), dim = 1)
         farthest_visualiser.visualize(th.tensor([[f_part_pos[0], f_part_pos[1], 0.05]]))
 
+        # position between the particle and the farthest particle
+        particles_deviation = f_part_pos[0:2] - particle_mean_pos
+        particles_deviation_dist = th.norm(particles_deviation, dim = 0)
+
         output = {
             "ee_particle_pos": ee_particle_pos,
             "ee_particle_dist": ee_particle_dist, 
@@ -234,6 +238,8 @@ class Dvision:
             "ee_fpart_dist": ee_fpart_dist,
             "target_fpart_pos": target_fpart_pos,
             "target_fpart_dist": target_fpart_dist,
+            "particles_deviation": particles_deviation,
+            "particles_deviation_dist": particles_deviation_dist,
         }
         return output
 

@@ -235,6 +235,8 @@ class BaselineSoft(Basetask):
         self.ee_fpart_dist = dist_pos["ee_fpart_dist"]
         self.target_fpart_pos = dist_pos["target_fpart_pos"]
         self.target_fpart_dist = dist_pos["target_fpart_dist"]
+        self.particles_deviation = dist_pos["particles_deviation"]
+        self.particles_deviation_dist = dist_pos["particles_deviation_dist"]
 
 
         if th.any(th.isnan(self.ee_particle_pos)) == True:
@@ -262,7 +264,7 @@ class BaselineSoft(Basetask):
                     self.ee_orientation_rad,
                     self.ee_fpart_pos.squeeze(dim=0),
                     self.particle_target_pos.squeeze(dim=0),
-                    self.target_fpart_pos.squeeze(dim=0),
+                    self.particles_deviation.squeeze(dim=0),
                 ])
         
         
@@ -359,6 +361,7 @@ class BaselineSoft(Basetask):
         self.particle_target_dist_init = dist_pos["particle_target_dist"]
         self.ee_fpart_dist_init = dist_pos["ee_fpart_dist"]
         self.ee_ftarget_dist_init = dist_pos["target_fpart_dist"]
+        self.particles_deviation_dist_init = dist_pos["particles_deviation_dist"]
 
         self.prev_obj_pos = dist_pos["fpart_pos"][0:2]
         self.sim_prev_time_target = self.sim.current_time
@@ -470,7 +473,7 @@ class BaselineSoft(Basetask):
         dist_a = - self.dist_normalized(0, self.ee_fpart_dist_init  , self.ee_fpart_dist)
         #dist_b =  - self.dist_normalized(0, self.ee_particle_dist_init, self.ee_particle_dist)
         dist_c = - self.dist_normalized(0, self.particle_target_dist_init, self.particle_target_dist)
-        dist_d = - self.dist_normalized(0, self.ee_ftarget_dist_init, self.target_fpart_dist)
+        dist_d = - self.dist_normalized(0, self.particles_deviation_dist_init, self.particles_deviation_dist)
         reward[0] =  dist_a + dist_c + dist_d
 
         
