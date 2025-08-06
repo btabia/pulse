@@ -56,9 +56,9 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
         self.obs_feature_size = 2837 # self.num_robot_obs + self.lstm_output_features
 
         ##### GAT config #####
-        self.gat_in_channels = 16
-        self.gat_hidden_channels_1 = 32
-        self.gat_hidden_channels_2 = 64
+        self.gat_in_channels = 128
+        self.gat_hidden_channels_1 = 256
+        self.gat_hidden_channels_2 = 256
         self.gat_out_channels = 64
 
         self.gat_heads_1 = 4
@@ -68,10 +68,10 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
 
         # shared layers/network
 
-        self.encoder = nn.Sequential(
-            nn.Linear(3, 8), 
+        self.pre_process = nn.Sequential(
+            nn.Linear(3, 64, device=self.device), 
             nn.LeakyReLU(0.2),
-            nn.Linear(8, 16),
+            nn.Linear(64, 128, device=self.device),
             nn.LeakyReLU(0.2),
         )
 
@@ -89,18 +89,14 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
                 )
 
 
-        self.point_aggregation = nn.Sequential(
-            nn.Linear(256, 256, device=self.device), 
-            nn.ReLU(),
-        )
-
-        self.global_features = nn.Sequential(
+        self.post_process = nn.Sequential(
+            nn.Linear(512, 256, device=self.device), 
+            nn.LeakyReLU(0.2),
             nn.Linear(256, 128, device=self.device), 
-            nn.ReLU(),
+            nn.LeakyReLU(0.2),
             nn.Linear(128, 64, device=self.device), 
-            nn.ReLU(),
+            nn.Tanh(),
         )
-
         
         ### MLP Network set
 
@@ -108,17 +104,21 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
 
 
         self.policy_layer = nn.Sequential(
-            nn.Linear(self.obs_feature_size, 128, device=self.device), 
+            nn.Linear(self.obs_feature_size, 512, device=self.device), 
             nn.ReLU(),
-            nn.Linear(128, 128, device=self.device), 
+            nn.Linear(512, 256, device=self.device),
+            nn.ReLU(),
+            nn.Linear(256, 128, device=self.device),
             nn.ReLU(),
             nn.Linear(128, self.num_actions, device=self.device), 
         )
 
         self.value_layer = nn.Sequential(
-            nn.Linear(self.obs_feature_size, 128, device=self.device), 
+            nn.Linear(self.obs_feature_size, 512, device=self.device), 
             nn.ReLU(),
-            nn.Linear(128, 128, device=self.device), 
+            nn.Linear(512, 256, device=self.device),
+            nn.ReLU(),
+            nn.Linear(256, 128, device=self.device),
             nn.ReLU(),
             nn.Linear(128, 1, device=self.device),  
         )
@@ -143,7 +143,7 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
             space = self.tensor_to_space(states, self.observation_space)
             point_cloud = space["point_cloud"]
             edge_index = space["edge_index"]
-            edge_attr = space["edge_attribute"]
+            #edge_attr = space["edge_attribute"]
 
             point_cloud.to(self.device)
             edge_index.to(self.device)
@@ -159,36 +159,40 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
 
 
             # set the edges to zero between the point cloud and the tool and one within the point cloud
-            edge_attributes_1 = torch.zeros((batch.edge_index.shape[1], 1), device=self.device)
-            edge_attributes_2 = torch.zeros((batch.edge_index.shape[1], 1), device=self.device)
-            edge_attributes_1[0:((4096*4)-1)] = edge_attr[0:((4096*4)-1)]
-            edge_attributes_2[4096:] = edge_attr[4096:]
+            #edge_attributes_1 = torch.zeros((batch.edge_index.shape[1], 1), device=self.device)
+            #edge_attributes_2 = torch.zeros((batch.edge_index.shape[1], 1), device=self.device)
+            #edge_attributes_1[0:((4096*4)-1)] = edge_attr[0:((4096*4)-1)]
+            #edge_attributes_2[4096:] = edge_attr[4096:]
 
-            data_list_1 = [Data(x=point_cloud[i], edge_index=edge_index[i], edge_attr = edge_attributes_1) for i  in range(states.shape[0])] 
+            data_list_1 = [Data(x=point_cloud[i], edge_index=edge_index[i]) for i  in range(states.shape[0])] 
             loader_1 = DataLoader(data_list_1, batch_size = states.shape[0])
             batch_1 = next(iter(loader_1))
 
-            data_list_2 = [Data(x=point_cloud[i], edge_index=edge_index[i], edge_attr = edge_attributes_2) for i  in range(states.shape[0])] 
-            loader_2 = DataLoader(data_list_2, batch_size = states.shape[0])
-            batch_2 = next(iter(loader_2))
-
+            
+            # encode the point cloud
+            x = self.pre_process(pc_)
+            x = x.view(states.shape[0], 4098, -1)
 
             # set the edges attributes to zero between the point cloud and the tool and one within the point cloud
-            x = self.gat_conv_1(x = batch_1.x , edge_index = batch_1.edge_index, edge_attr = batch_1.edge_attr)
-            x = F.elu(x)
+            x1 = batch_1.x
+            x = self.gat_conv_1(x = batch_1.x , edge_index = batch_1.edge_index)
+            x = F.LeakyReLU(0.2)(x)
+            x = x + x1
+            x2 = x
             # set the edges to one between the point cloud and the tool and zero within the point cloud
-            x = self.gat_conv_2(x = x, edge_index = batch.edge_index, edge_attr = batch_2.edge_attr)
-            x = F.elu(x) 
+            x = self.gat_conv_2(x = x, edge_index = batch_1.edge_index)
+            x = F.LeakyReLU(0.2)(x)
+            x = x + x2
 
-            
-            x = x.view(states.shape[0], 4097, -1)
+            #extract the target and tool features from the point cloud
+            target_features = x[:, 4096, :]
+            tool_features = x[:, 4097, :]
+            # concatenate the target and tool features with the tool observations
+            x = torch.cat([target_features, tool_features], dim=-1)
+
+            x = x.view(states.shape[0], 512, -1)
                
-            x = self.point_aggregation(x)
-
-            x = torch.max(x, dim = 1)[0]
-
-            x = self.global_features(x)
-
+            x = self.post_process(x)
 
             self._gat_output = torch.cat([x.view(states.shape[0], -1),tool_obs.view(states.shape[0], -1)], dim = -1)
 

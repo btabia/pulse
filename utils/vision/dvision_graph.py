@@ -320,22 +320,13 @@ class Dvision:
         particle_mean_pos = th.tensor([[part_x.item(), part_y.item()]], device = self.device)
 
         part_ee_pos = th.zeros((medium_tensor_pc.shape[0], 3), device = self.device)
-        target_ee_pos = th.zeros((target_pc.shape[0], 3), device = self.device)
+
         part_ee_pos[:,[0]] = medium_tensor_pc[:,[0]].to(self.device) #- ee_position[:,[0]].to(self.device)
         part_ee_pos[:,[1]] = medium_tensor_pc[:,[1]].to(self.device) #- ee_position[:,[1]].to(self.device)
         part_ee_pos[:,[2]] = medium_tensor_pc[:,[2]].to(self.device)
 
-        target_ee_pos[:,[0]] = target_pc[:,[0]] #- ee_position[:,[0]].to(self.device)
-        target_ee_pos[:,[1]] = target_pc[:,[1]] #- ee_position[:,[1]].to(self.device)
-        target_ee_pos[:,[2]] = target_pc[:,[2]] 
-        
 
-        new_target_ee_pos = target_ee_pos
-        new_target_ee_pos[:, [2]] = target_ee_pos[:,[2]] * 0.01
-
-        full_scene_pc = th.concatenate([part_ee_pos, new_target_ee_pos])
-
-        structured_pc = self.get_structured_pointcloud(full_scene_pc,(self.cfg["task"]["camera"]["img_w"],self.cfg["task"]["camera"]["img_h"]), device = self.device)
+        structured_pc = self.get_structured_pointcloud(part_ee_pos,(self.cfg["task"]["camera"]["img_w"],self.cfg["task"]["camera"]["img_h"]), device = self.device)
 
         _pos = structured_pc[:,0:2]
         structured_graph = Data(x = structured_pc, pos = _pos)
@@ -347,16 +338,18 @@ class Dvision:
 
 
         structured_graph.pos = structured_pc
-        # we add the virtual node which correspond to the robot EE position
+        # we add the virtual node which correspond to the target position
         transform = T.Compose([VirtualNode()])
         structured_graph = transform(structured_graph)
-        structured_graph.x[4096] = ee_position[[0]].to(self.device)
+        structured_graph.x[4096] = target_pc[0].to(self.device)
 
-        # we add the edge attributes
-        edge_attributes = th.ones((structured_graph.edge_index.shape[1], 1), device=self.device)
+        # we add the virtual nodes which correspond to the ee position
+        transform = T.Compose([VirtualNode()])
+        structured_graph = transform(structured_graph)
+        structured_graph.x[4097] = ee_position[[0]].to(self.device)
 
 
-        structured_graph = Data(x = structured_graph.x, edge_index = structured_graph.edge_index, edge_attr = edge_attributes)
+        structured_graph = Data(x = structured_graph.x, edge_index = structured_graph.edge_index)
 
         # provide the relative cartesian difference of position between each nodes
         #transform = T.Compose([Cartesian(norm = False)])

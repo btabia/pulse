@@ -1,0 +1,15 @@
+---
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+    
+defaults:
+    - train: ppo_gat # default/ppo/tqc/sac
+    - wandb: pulse
+    - hydra: defaults
+    - app: lab_app
+    - env: baseline_gat
+    - tasks: pulse
+    - play: baseline_gat
+

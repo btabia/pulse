@@ -17,7 +17,7 @@ from utils.vision.dvision_graph import Dvision
 from utils.admittance_controller import AdmittanceController
 
 
-class GatPush(Basetask):
+class Pulse(Basetask):
     def __init__(self, cfg):
         #import utilities
         self.cfg = cfg
@@ -255,7 +255,6 @@ class GatPush(Basetask):
                     self.ee_orientation_rad,
                     self.ee_particle_pos.squeeze(dim=0), # dim 3ff
                     self.particle_target_pos.squeeze(dim=0),
-                    self.joint_pos.squeeze(dim=0), #dim 7
                 ])
         
         if th.any(th.isnan(tool_obs)) == True:
@@ -270,7 +269,6 @@ class GatPush(Basetask):
         obs = {
             "point_cloud": structured_graph.x,
             "edge_index": structured_graph.edge_index,
-            "edge_attribute": structured_graph.edge_attr,
             "tool": tool_obs,
         }
         return {"policy": obs}

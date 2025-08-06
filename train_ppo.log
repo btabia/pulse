@@ -2212,3 +2212,13 @@
 [2025-07-30 23:05:08,889][matplotlib][DEBUG] - CONFIGDIR=/home/btabia/.config/matplotlib
 [2025-07-30 23:05:08,890][matplotlib][DEBUG] - interactive is False
 [2025-07-30 23:05:08,890][matplotlib][DEBUG] - platform is linux
+[2025-07-30 23:05:11,569][matplotlib][DEBUG] - CACHEDIR=/home/btabia/.cache/matplotlib
+[2025-07-30 23:05:11,571][matplotlib.font_manager][DEBUG] - Using fontManager instance from /home/btabia/.cache/matplotlib/fontlist-v390.json
+[2025-07-30 23:05:17,629][skrl][INFO] - Environment wrapper: Isaac Lab (single-agent)
+[2025-07-30 23:05:17,635][git.util][DEBUG] - sys.platform='linux', git_executable='git'
+[2025-07-30 23:05:17,635][git.cmd][DEBUG] - Popen(['git', 'rev-parse', '--show-toplevel'], cwd=/home/btabia/git/pulse, stdin=None, shell=False, universal_newlines=False)
+[2025-07-30 23:05:17,642][urllib3.connectionpool][DEBUG] - Starting new HTTPS connection (1): api.wandb.ai:443
+[2025-07-30 23:05:17,835][urllib3.connectionpool][DEBUG] - https://api.wandb.ai:443 "POST /graphql HTTP/1.1" 200 None
+[2025-07-30 23:05:18,016][urllib3.connectionpool][DEBUG] - https://api.wandb.ai:443 "POST /graphql HTTP/1.1" 200 None
+[2025-07-30 23:05:18,229][git.util][DEBUG] - sys.platform='linux', git_executable='git'
+[2025-07-30 23:05:18,230][git.cmd][DEBUG] - Popen(['git', 'cat-file', '--batch-check'], cwd=/home/btabia/git/pulse, stdin=<valid stream>, shell=False, universal_newlines=False)
