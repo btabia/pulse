@@ -4,11 +4,12 @@ name: "BaseEnv-v0"
 
 
 env_cfg: 
+  type: "pulse"
   env_path: "/home/btabia/git/new/Malleabot/assets/env_setup/env_ycb.usd"
   decimation: 20 # skip frame
   decimation_cmd: 20
   decimation_ctrl: 1
-  episode_length_s : 25
+  episode_length_s : 17.33
   action_scale : [0.025, 0.025, 20] #Dx, Dy, Dtheta
   feature_extractor: 
     type: "GAT"
@@ -16,12 +17,15 @@ env_cfg:
     k_neighbour: 4
     virtual_node_link: 2
   num_actions : 3
-  tool_num_obs: 14
+  tool_num_obs: 7
   vision_h: 128
   vision_w: 128
   state_space : 0
   device: "cpu" #"cuda:${oc.decode:${oc.env:CUDA_DEVICE}}"
   seed: 42
+  datalogger: False
+  datalog_path: "/home/btabia/git/new/Malleabot/datalog/position_cnn/test_5"
+
 simulation_cfg:
   freq: 300
   use_fabric: False

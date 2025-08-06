@@ -34,7 +34,7 @@ class MyData(Data):
 
 # define the shared model
 class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
-    def __init__(self, observation_space, action_space, device, clip_actions=False,
+    def __init__(self, observation_space, action_space, device, device_output,  clip_actions=False,
                 clip_log_std=True, min_log_std=-20, max_log_std=2, reduction="sum", 
                 num_envs=1, arch = [64,64], activation = "relu", vision_h = 32, vision_w = 32, num_robot_obs = 14):
         Model.__init__(self, observation_space, action_space, device)
@@ -44,6 +44,7 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
         #self.activation = activation
         self.num_envs = 1
         self.device = device
+        self.device_output = device_output
         self.num_robot_obs = num_robot_obs
         self.cnn_output = 32
         self.dropout_prob = 0
@@ -56,9 +57,9 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
         self.obs_feature_size = 2837 # self.num_robot_obs + self.lstm_output_features
 
         ##### GAT config #####
-        self.gat_in_channels = 128
-        self.gat_hidden_channels_1 = 256
-        self.gat_hidden_channels_2 = 256
+        self.gat_in_channels = 16
+        self.gat_hidden_channels_1 = 64
+        self.gat_hidden_channels_2 = 64
         self.gat_out_channels = 64
 
         self.gat_heads_1 = 4
@@ -69,11 +70,12 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
         # shared layers/network
 
         self.pre_process = nn.Sequential(
-            nn.Linear(3, 64, device=self.device), 
+            nn.Linear(3, 8, device=self.device), 
             nn.LeakyReLU(0.2),
-            nn.Linear(64, 128, device=self.device),
+            nn.Linear(8, 16, device=self.device),
             nn.LeakyReLU(0.2),
         )
+
 
         # layer to extract grid features
         self.gat_conv_1 =  GATv2Conv(
@@ -100,7 +102,7 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
         
         ### MLP Network set
 
-        self.obs_feature_size = 14 + 64
+        self.obs_feature_size = 7 + 64
 
 
         self.policy_layer = nn.Sequential(
@@ -145,58 +147,53 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
             edge_index = space["edge_index"]
             #edge_attr = space["edge_attribute"]
 
-            point_cloud.to(self.device)
-            edge_index.to(self.device)
+            point_cloud = point_cloud.to(self.device)
+            edge_index = edge_index.to(self.device)
             #edge_attr.to(self.device)
             pc_ = point_cloud
-            ed_ = edge_index 
 
             edge_index = edge_index.type(torch.int64)
 
             tool_obs = space["tool"]
-            tool_obs.to(self.device)
-            
-
-
+            tool_obs = tool_obs.to(self.device)
+        
             # set the edges to zero between the point cloud and the tool and one within the point cloud
             #edge_attributes_1 = torch.zeros((batch.edge_index.shape[1], 1), device=self.device)
             #edge_attributes_2 = torch.zeros((batch.edge_index.shape[1], 1), device=self.device)
             #edge_attributes_1[0:((4096*4)-1)] = edge_attr[0:((4096*4)-1)]
             #edge_attributes_2[4096:] = edge_attr[4096:]
 
-            data_list_1 = [Data(x=point_cloud[i], edge_index=edge_index[i]) for i  in range(states.shape[0])] 
+            # encode the point cloud
+            x = self.pre_process(pc_)
+
+            data_list_1 = [Data(x=x[i], edge_index=edge_index[i]) for i  in range(states.shape[0])] 
             loader_1 = DataLoader(data_list_1, batch_size = states.shape[0])
             batch_1 = next(iter(loader_1))
 
-            
-            # encode the point cloud
-            x = self.pre_process(pc_)
-            x = x.view(states.shape[0], 4098, -1)
-
             # set the edges attributes to zero between the point cloud and the tool and one within the point cloud
-            x1 = batch_1.x
+            #x1 = x.view(-1, x.shape[-1])
+
             x = self.gat_conv_1(x = batch_1.x , edge_index = batch_1.edge_index)
-            x = F.LeakyReLU(0.2)(x)
-            x = x + x1
-            x2 = x
+            x = F.leaky_relu(x, negative_slope=0.2)
             # set the edges to one between the point cloud and the tool and zero within the point cloud
             x = self.gat_conv_2(x = x, edge_index = batch_1.edge_index)
-            x = F.LeakyReLU(0.2)(x)
-            x = x + x2
+            x = F.leaky_relu(x, negative_slope=0.2)
+
 
             #extract the target and tool features from the point cloud
+            # capture the target and tool features from the point cloud batch
+            x = x.view(states.shape[0], 4098, -1)  # 4096 for the point cloud, 1 for the target, and 1 for the tool
             target_features = x[:, 4096, :]
             tool_features = x[:, 4097, :]
             # concatenate the target and tool features with the tool observations
             x = torch.cat([target_features, tool_features], dim=-1)
 
-            x = x.view(states.shape[0], 512, -1)
-               
             x = self.post_process(x)
 
             self._gat_output = torch.cat([x.view(states.shape[0], -1),tool_obs.view(states.shape[0], -1)], dim = -1)
 
             output = torch.tanh(self.policy_layer(self._gat_output))
+            output = output.to(self.device_output)
             return output, self.log_std_parameter, {}
 
         elif role == "value":
@@ -205,8 +202,11 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
                 space = self.tensor_to_space(states, self.observation_space)
                 point_cloud = space["point_cloud"]
                 edge_index = space["edge_index"]
+                #edge_attr = space["edge_attribute"]
+
                 point_cloud.to(self.device)
                 edge_index.to(self.device)
+                #edge_attr.to(self.device)
                 pc_ = point_cloud
                 ed_ = edge_index 
 
@@ -214,30 +214,47 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
 
                 tool_obs = space["tool"]
                 tool_obs.to(self.device)
+            
+                # set the edges to zero between the point cloud and the tool and one within the point cloud
+                #edge_attributes_1 = torch.zeros((batch.edge_index.shape[1], 1), device=self.device)
+                #edge_attributes_2 = torch.zeros((batch.edge_index.shape[1], 1), device=self.device)
+                #edge_attributes_1[0:((4096*4)-1)] = edge_attr[0:((4096*4)-1)]
+                #edge_attributes_2[4096:] = edge_attr[4096:]
+
+                data_list_1 = [Data(x=point_cloud[i], edge_index=edge_index[i]) for i  in range(states.shape[0])] 
+                loader_1 = DataLoader(data_list_1, batch_size = states.shape[0])
+                batch_1 = next(iter(loader_1))
+
                 
-                data_list = [Data(x=point_cloud[i], edge_index=edge_index[0]) for i  in range(states.shape[0])] 
-                loader = DataLoader(data_list, batch_size = states.shape[0])
-                batch = next(iter(loader))
+                # encode the point cloud
+                x = self.pre_process(pc_)
 
-                x = self.gat_conv_1(x = batch.x , edge_index = batch.edge_index)
-                x = F.elu(x)
-                x = self.gat_conv_2(x = x, edge_index = batch.edge_index)
-                x = F.elu(x) 
- 
-                x = x.view(states.shape[0], 4097, -1)
+                # set the edges attributes to zero between the point cloud and the tool and one within the point cloud
+                x1 = x.view(-1, x.shape[-1])
+                x = self.gat_conv_1(x = x1 , edge_index = batch_1.edge_index)
+                x = F.leaky_relu(x, negative_slope=0.2)
+                # set the edges to one between the point cloud and the tool and zero within the point cloud
+                x = self.gat_conv_2(x = x, edge_index = batch_1.edge_index)
+                x = F.leaky_relu(x, negative_slope=0.2)
+
+
+                #extract the target and tool features from the point cloud
+                # capture the target and tool features from the point cloud batch
+                x = x.view(states.shape[0], 4098, -1)  # 4096 for the point cloud, 1 for the target, and 1 for the tool
+                target_features = x[:, 4096, :]
+                tool_features = x[:, 4097, :]
+                # concatenate the target and tool features with the tool observations
+                x = torch.cat([target_features, tool_features], dim=-1)
                 
-                x = self.point_aggregation(x)
-
-                x = torch.max(x, dim = 1)[0]
-
-                x = self.global_features(x)
-
+                x = self.post_process(x)
 
                 gat_output = torch.cat([x.view(states.shape[0], -1),tool_obs.view(states.shape[0], -1)], dim = -1)
+
             else: 
                 gat_output =self._gat_output
             self._gat_output = None
             output = self.value_layer(gat_output)
+            output = output.to(self.device_output)
             return output, {}
 
 

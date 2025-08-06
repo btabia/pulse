@@ -67,9 +67,15 @@ class BaseEnv(DirectRLEnv):
             "tool": spaces.Box(low = -float("inf"), high = float("inf"), shape = (self.cfg_env["env_cfg"]["tool_num_obs"],), dtype= np.float32),
             }
         elif self.cfg_env["env_cfg"]["feature_extractor"]["type"] == "GAT":
+            edge_num = self.cfg_env["env_cfg"]["feature_extractor"]["shape"] * self.cfg_env["env_cfg"]["feature_extractor"]["k_neighbour"]
+            for i in range(self.cfg_env["env_cfg"]["feature_extractor"]["virtual_node_link"] + 1):
+                if i == 0:
+                    edge_num += 0
+                else:
+                    edge_num += ((self.cfg_env["env_cfg"]["feature_extractor"]["shape"]) + (i - 1) ) * 2                                                         
             self.spaces = {
-            "point_cloud": spaces.Box(low = -float("inf"), high = float("inf"), shape = (self.cfg_env["env_cfg"]["feature_extractor"]["shape"] + 1,3), dtype= np.float32),
-            "edge_index": spaces.Box(low = -float("inf"), high = float("inf"), shape = (2, self.cfg_env["env_cfg"]["feature_extractor"]["shape"] * (self.cfg_env["env_cfg"]["feature_extractor"]["k_neighbour"] + self.cfg_env["env_cfg"]["feature_extractor"]["virtual_node_link"])), dtype= np.int32),
+            "point_cloud": spaces.Box(low = -float("inf"), high = float("inf"), shape = (self.cfg_env["env_cfg"]["feature_extractor"]["shape"] + 2,3), dtype= np.float32),
+            "edge_index": spaces.Box(low = -float("inf"), high = float("inf"), shape = (2, edge_num), dtype= np.int32),
             #"edge_attribute": spaces.Box(low = -float("inf"), high = float("inf"), shape = ( self.cfg_env["env_cfg"]["feature_extractor"]["shape"] * (self.cfg_env["env_cfg"]["feature_extractor"]["k_neighbour"] + self.cfg_env["env_cfg"]["feature_extractor"]["virtual_node_link"]), 1), dtype= np.float32),
             "tool": spaces.Box(low = -float("inf"), high = float("inf"), shape = (self.cfg_env["env_cfg"]["tool_num_obs"],), dtype= np.float32),
             }

@@ -58,6 +58,7 @@ def setup_training_configuration(cfg, env, wconf) -> None:
     if cfg["RL"]["algo"]["type"] == "PPO": 
 
         device = cfg["RL"]["algo"]["device"]
+        device_model = cfg["RL"]["algo"]["device_model"]
         activation = cfg["RL"]["algo"]["activation"]
         value_arch = cfg["RL"]["algo"]["arch"]
         policy_arch = cfg["RL"]["algo"]["arch"]
@@ -69,8 +70,8 @@ def setup_training_configuration(cfg, env, wconf) -> None:
             models["policy"] = Shared_PPO_CNN(env.observation_space, env.action_space, device, clip_actions=True, num_envs=1, arch=policy_arch, activation=activation, vision_w=cfg["RL"]["vision_h"], vision_h=cfg["RL"]["vision_w"], num_robot_obs=cfg["RL"]["tool_num_obs"])
             models["value"] = models["policy"]
         elif cfg["RL"]["algo"]["feature_extractor"] == "GAT":
-            print("stupid")
-            models["policy"] = Shared_PPO_GAT(env.observation_space, env.action_space, device, clip_actions=True, num_envs=1, arch=policy_arch, activation=activation, vision_w=cfg["RL"]["vision_h"], vision_h=cfg["RL"]["vision_w"], num_robot_obs=cfg["RL"]["tool_num_obs"])
+            print("GAT policy selected")
+            models["policy"] = Shared_PPO_GAT(env.observation_space, env.action_space, device_model, device, clip_actions=True, num_envs=1, arch=policy_arch, activation=activation, vision_w=cfg["RL"]["vision_h"], vision_h=cfg["RL"]["vision_w"], num_robot_obs=cfg["RL"]["tool_num_obs"])
             models["value"] = models["policy"]
 
 

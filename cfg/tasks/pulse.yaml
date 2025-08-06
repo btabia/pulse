@@ -153,15 +153,15 @@ task:
     training_set:  
       init_pos: [
         [1.6, -0.8, 0.02366],
-        [1.6, -0.6, 0.02128],
-        [1.6, -0.4, 0.03601],
-        [1.6, -0.2, 0.02597],
+        #[1.6, -0.6, 0.02128],
+        #[1.6, -0.4, 0.03601],
+        #[1.6, -0.2, 0.02597],
       ]
       prim_path: [
         "/World/collection/ycb/tuna_fish_can", 
-        "/World/collection/ycb/sugar_box", 
-        "/World/collection/ycb/rubiks_cube", 
-        "/World/collection/ycb/foam_brick", 
+        #"/World/collection/ycb/sugar_box", 
+        #"/World/collection/ycb/rubiks_cube", 
+        #"/World/collection/ycb/foam_brick", 
       ]
     testing_set: 
       init_pos: [

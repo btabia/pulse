@@ -334,6 +334,7 @@ class Dvision:
         transform = T.Compose([KNNGraph(k = self.knn_link)])
         structured_graph = transform(structured_graph)
 
+        #edge_index = structured_graph.edge_index
         #print("edge index: " + str(edge_index.shape))
 
 
@@ -343,12 +344,16 @@ class Dvision:
         structured_graph = transform(structured_graph)
         structured_graph.x[4096] = target_pc[0].to(self.device)
 
+        #edge_index = structured_graph.edge_index
+        #print("edge index shape 1 : " + str(edge_index.shape))
+
         # we add the virtual nodes which correspond to the ee position
         transform = T.Compose([VirtualNode()])
         structured_graph = transform(structured_graph)
         structured_graph.x[4097] = ee_position[[0]].to(self.device)
 
-
+        # get the edge index sshape
+        edge_index = structured_graph.edge_index
         structured_graph = Data(x = structured_graph.x, edge_index = structured_graph.edge_index)
 
         # provide the relative cartesian difference of position between each nodes

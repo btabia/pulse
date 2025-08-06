@@ -397,7 +397,8 @@ class Pulse(Basetask):
         self.P_rate = th.tensor([[(ee_pose[0][0] + Pxy[0][0]), (ee_pose[0][1] +  Pxy[0][1]), 0]], device = self.device)
 
 
-
+    def update_obj_pos(self):
+        pass
 
     def estimate_obj_velocity(self, dt, obj_pos):
         _dt = th.tensor([[dt, dt]], device = self.device)
