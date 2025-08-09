@@ -9,7 +9,7 @@ RL:
     base_directory: "./training_data/"
   vision_h: 64
   vision_w: 64
-  tool_num_obs: 7
+  tool_num_obs: 3
   load_policy: False
   load_policy_path: "/home/btabia/git/new/Malleabot/training_data/25-06-02_21-59-29-384769_PPO/checkpoints/best_agent.pt"
   seed: 42
@@ -21,7 +21,7 @@ RL:
     type: "PPO" 
     feature_extractor: "GAT"
     lstm: False
-    rollouts: 4096
+    rollouts: 1024
     learning_epochs: 10
     mini_batch_size: 128
     discount_factor: 0.99

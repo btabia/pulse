@@ -17,7 +17,7 @@ env_cfg:
     k_neighbour: 4
     virtual_node_link: 2
   num_actions : 3
-  tool_num_obs: 7
+  tool_num_obs: 3
   vision_h: 128
   vision_w: 128
   state_space : 0

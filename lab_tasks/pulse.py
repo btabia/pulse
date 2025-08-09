@@ -253,8 +253,8 @@ class Pulse(Basetask):
         tool_obs =  th.concatenate(
                 [
                     self.ee_orientation_rad,
-                    self.ee_particle_pos.squeeze(dim=0), # dim 3ff
-                    self.particle_target_pos.squeeze(dim=0),
+                    #self.ee_particle_pos.squeeze(dim=0), # dim 3ff
+                    #self.particle_target_pos.squeeze(dim=0),
                 ])
         
         if th.any(th.isnan(tool_obs)) == True:
@@ -269,6 +269,7 @@ class Pulse(Basetask):
         obs = {
             "point_cloud": structured_graph.x,
             "edge_index": structured_graph.edge_index,
+            "edge_attribute": structured_graph.edge_attr,
             "tool": tool_obs,
         }
         return {"policy": obs}

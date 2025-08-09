@@ -1,4 +1,4 @@
-program: /home/btabia/git/new/Malleabot/train_ppo.py
+program: /home/btabia/git/pulse/train_ppo.py
 method: bayes
 metric:
   name: Reward / Total reward (mean)

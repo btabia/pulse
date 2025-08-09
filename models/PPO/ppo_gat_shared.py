@@ -57,13 +57,14 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
         self.obs_feature_size = 2837 # self.num_robot_obs + self.lstm_output_features
 
         ##### GAT config #####
-        self.gat_in_channels = 16
-        self.gat_hidden_channels_1 = 64
+        self.gat_in_channels = 8
+        self.gat_hidden_channels_1 = 32
         self.gat_hidden_channels_2 = 64
         self.gat_out_channels = 64
 
         self.gat_heads_1 = 4
-        self.gat_heads_2 = 4
+        self.gat_heads_2 = 1
+        self.edge_attr_dim = 3  # Assuming edge attributes are 3-dimensional
 
 
 
@@ -72,37 +73,34 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
         self.pre_process = nn.Sequential(
             nn.Linear(3, 8, device=self.device), 
             nn.LeakyReLU(0.2),
-            nn.Linear(8, 16, device=self.device),
-            nn.LeakyReLU(0.2),
         )
-
 
         # layer to extract grid features
         self.gat_conv_1 =  GATv2Conv(
                 in_channels = self.gat_in_channels, # variable graph size
                 out_channels = self.gat_hidden_channels_1, #
                 heads = self.gat_heads_1, 
+                edge_dim = self.edge_attr_dim,  # <-- Add this!
                 )
         # layer to extract agent features
         self.gat_conv_2 =  GATv2Conv(
                 in_channels = self.gat_hidden_channels_1 * self.gat_heads_1 , # variable graph size
                 out_channels = self.gat_hidden_channels_2, #
                 heads = self.gat_heads_2, 
+                edge_dim = self.edge_attr_dim,  # <-- Add this!
                 )
 
 
         self.post_process = nn.Sequential(
-            nn.Linear(512, 256, device=self.device), 
-            nn.LeakyReLU(0.2),
-            nn.Linear(256, 128, device=self.device), 
-            nn.LeakyReLU(0.2),
             nn.Linear(128, 64, device=self.device), 
+            nn.LeakyReLU(0.2),
+            nn.Linear(64, 32, device=self.device), 
             nn.Tanh(),
         )
         
         ### MLP Network set
 
-        self.obs_feature_size = 7 + 64
+        self.obs_feature_size = 3 + 32
 
 
         self.policy_layer = nn.Sequential(
@@ -145,11 +143,11 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
             space = self.tensor_to_space(states, self.observation_space)
             point_cloud = space["point_cloud"]
             edge_index = space["edge_index"]
-            #edge_attr = space["edge_attribute"]
+            edge_attr = space["edge_attribute"]
 
             point_cloud = point_cloud.to(self.device)
             edge_index = edge_index.to(self.device)
-            #edge_attr.to(self.device)
+            edge_attr.to(self.device)
             pc_ = point_cloud
 
             edge_index = edge_index.type(torch.int64)
@@ -166,17 +164,17 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
             # encode the point cloud
             x = self.pre_process(pc_)
 
-            data_list_1 = [Data(x=x[i], edge_index=edge_index[i]) for i  in range(states.shape[0])] 
+            data_list_1 = [Data(x=x[i], edge_index=edge_index[i], edge_attr = edge_attr[i]) for i  in range(states.shape[0])] 
             loader_1 = DataLoader(data_list_1, batch_size = states.shape[0])
             batch_1 = next(iter(loader_1))
 
             # set the edges attributes to zero between the point cloud and the tool and one within the point cloud
             #x1 = x.view(-1, x.shape[-1])
 
-            x = self.gat_conv_1(x = batch_1.x , edge_index = batch_1.edge_index)
+            x = self.gat_conv_1(x = batch_1.x , edge_index = batch_1.edge_index, edge_attr = batch_1.edge_attr)
             x = F.leaky_relu(x, negative_slope=0.2)
             # set the edges to one between the point cloud and the tool and zero within the point cloud
-            x = self.gat_conv_2(x = x, edge_index = batch_1.edge_index)
+            x = self.gat_conv_2(x = x, edge_index = batch_1.edge_index, edge_attr = batch_1.edge_attr)
             x = F.leaky_relu(x, negative_slope=0.2)
 
 

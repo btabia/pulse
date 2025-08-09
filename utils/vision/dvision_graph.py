@@ -357,8 +357,9 @@ class Dvision:
         structured_graph = Data(x = structured_graph.x, edge_index = structured_graph.edge_index)
 
         # provide the relative cartesian difference of position between each nodes
-        #transform = T.Compose([Cartesian(norm = False)])
-        #structured_graph = transform(structured_graph)
+        structured_graph.pos = structured_graph.x
+        transform = T.Compose([Cartesian(norm = False, cat = False)])
+        structured_graph = transform(structured_graph)
 
         #structured_pcd = o3d.t.geometry.PointCloud(o3c.Tensor.from_dlpack(torch.utils.dlpack.to_dlpack(structured_pc)))
         #o3d.io.write_point_cloud("structured_pcd.ply", structured_pcd.to_legacy())
