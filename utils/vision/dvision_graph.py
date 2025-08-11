@@ -303,7 +303,7 @@ class Dvision:
         from isaaclab.managers import SceneEntityCfg
         from torch_geometric.data import Data
         import torch_geometric.transforms as T
-        from torch_geometric.transforms import SamplePoints, KNNGraph, GridSampling, Cartesian, RemoveSelfLoops, RemoveDuplicatedEdges, VirtualNode
+        from torch_geometric.transforms import SamplePoints, KNNGraph, GridSampling, Cartesian, Distance, RemoveSelfLoops, RemoveDuplicatedEdges, VirtualNode
         from torch_geometric.utils import grid
         #from isaaclab.utils.math import transform_points, unproject_depth
         from isaaclab.sensors.camera.utils import create_pointcloud_from_depth
@@ -358,7 +358,7 @@ class Dvision:
 
         # provide the relative cartesian difference of position between each nodes
         structured_graph.pos = structured_graph.x
-        transform = T.Compose([Cartesian(norm = False, cat = False)])
+        transform = T.Compose([Distance(norm = False, cat = False)])
         structured_graph = transform(structured_graph)
 
         #structured_pcd = o3d.t.geometry.PointCloud(o3c.Tensor.from_dlpack(torch.utils.dlpack.to_dlpack(structured_pc)))

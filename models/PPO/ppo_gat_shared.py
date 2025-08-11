@@ -58,13 +58,13 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
 
         ##### GAT config #####
         self.gat_in_channels = 8
-        self.gat_hidden_channels_1 = 32
-        self.gat_hidden_channels_2 = 64
+        self.gat_hidden_channels_1 = 16
+        self.gat_hidden_channels_2 = 32
         self.gat_out_channels = 64
 
-        self.gat_heads_1 = 4
+        self.gat_heads_1 = 8
         self.gat_heads_2 = 1
-        self.edge_attr_dim = 3  # Assuming edge attributes are 3-dimensional
+        self.edge_attr_dim = 1  # Assuming edge attributes are 3-dimensional
 
 
 
@@ -92,10 +92,8 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
 
 
         self.post_process = nn.Sequential(
-            nn.Linear(128, 64, device=self.device), 
-            nn.LeakyReLU(0.2),
             nn.Linear(64, 32, device=self.device), 
-            nn.Tanh(),
+            nn.LeakyReLU(0.2),
         )
         
         ### MLP Network set
@@ -104,21 +102,17 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
 
 
         self.policy_layer = nn.Sequential(
-            nn.Linear(self.obs_feature_size, 512, device=self.device), 
+            nn.Linear(self.obs_feature_size, 128, device=self.device), 
             nn.ReLU(),
-            nn.Linear(512, 256, device=self.device),
-            nn.ReLU(),
-            nn.Linear(256, 128, device=self.device),
+            nn.Linear(128, 128, device=self.device),
             nn.ReLU(),
             nn.Linear(128, self.num_actions, device=self.device), 
         )
 
         self.value_layer = nn.Sequential(
-            nn.Linear(self.obs_feature_size, 512, device=self.device), 
+            nn.Linear(self.obs_feature_size, 128, device=self.device), 
             nn.ReLU(),
-            nn.Linear(512, 256, device=self.device),
-            nn.ReLU(),
-            nn.Linear(256, 128, device=self.device),
+            nn.Linear(128, 128, device=self.device),
             nn.ReLU(),
             nn.Linear(128, 1, device=self.device),  
         )

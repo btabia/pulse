@@ -76,7 +76,7 @@ class BaseEnv(DirectRLEnv):
             self.spaces = {
             "point_cloud": spaces.Box(low = -float("inf"), high = float("inf"), shape = (self.cfg_env["env_cfg"]["feature_extractor"]["shape"] + 2,3), dtype= np.float32),
             "edge_index": spaces.Box(low = -float("inf"), high = float("inf"), shape = (2, edge_num), dtype= np.int32),
-            "edge_attribute": spaces.Box(low = -float("inf"), high = float("inf"), shape = (edge_num, 3), dtype= np.float32),
+            "edge_attribute": spaces.Box(low = -float("inf"), high = float("inf"), shape = (edge_num, 1), dtype= np.float32),
             "tool": spaces.Box(low = -float("inf"), high = float("inf"), shape = (self.cfg_env["env_cfg"]["tool_num_obs"],), dtype= np.float32),
             }
         elif self.cfg_env["env_cfg"]["feature_extractor"]["type"] == "None": 
