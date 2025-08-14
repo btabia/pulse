@@ -17,6 +17,7 @@ from skrl.resources.preprocessors.torch import RunningStandardScaler
 from skrl.resources.schedulers.torch import KLAdaptiveRL
 from skrl.trainers.torch import SequentialTrainer
 from skrl.utils import set_seed
+from skrl.utils.spaces.torch import unflatten_tensorized_space
 from models.utils.cvc.cvc import CoordConv
 
 from torch_geometric.data import Data, Batch
@@ -140,7 +141,9 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
     def compute(self, inputs, role):
         if role == "policy":
             states = inputs["states"]
-            space = self.tensor_to_space(states, self.observation_space)
+            print("states shape: " + str(states.shape))
+            print("states: " + str(states))
+            space = unflatten_tensorized_space(self.observation_space, states)
             point_cloud = space["point_cloud"]
             edge_index = space["edge_index"]
             edge_attr = space["edge_attribute"]
@@ -160,6 +163,11 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
             #edge_attributes_2 = torch.zeros((batch.edge_index.shape[1], 1), device=self.device)
             #edge_attributes_1[0:((4096*4)-1)] = edge_attr[0:((4096*4)-1)]
             #edge_attributes_2[4096:] = edge_attr[4096:]
+
+            print("edge index model : " + str(edge_index))
+            print("tool obs model : " + str(tool_obs))
+            print("point cloud model : " + str(pc_))
+            print("observation space: " + str(self.observation_space))
 
             # encode the point cloud
             x = self.pre_process(pc_)
@@ -197,7 +205,7 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
         elif role == "value":
             if self._gat_output == None: 
                 states = inputs["states"]
-                space = self.tensor_to_space(states, self.observation_space)
+                space = unflatten_tensorized_space(self.observation_space, states)
                 point_cloud = space["point_cloud"]
                 edge_index = space["edge_index"]
                 #edge_attr = space["edge_attribute"]

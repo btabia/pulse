@@ -267,11 +267,15 @@ class Pulse(Basetask):
             self.bad_episode = True
         tool_obs = th.nan_to_num(tool_obs)
         obs = {
-            "point_cloud": structured_graph.x,
-            "edge_index": structured_graph.edge_index,
-            "edge_attribute": structured_graph.edge_attr,
-            "tool": tool_obs,
+            "point_cloud": structured_graph.x,  # Ensure x is 2D
+            "edge_index": structured_graph.edge_index,  # Ensure edge_index is 2D
+            "edge_attribute": structured_graph.edge_attr,  # Ensure edge_attr is 2D
+            "tool": tool_obs.squeeze(dim=0),  # Ensure tool_obs is 2D
         }
+        print(" observation edge index: " + str(obs["edge_index"]))
+        print("observation edge index shape: " + str(obs["edge_index"].shape))
+        print("observation tool : " + str(obs["tool"]))
+        print("observation point cloud: " + str(obs["point_cloud"]))
         return {"policy": obs}
 
 

@@ -178,7 +178,7 @@ class Dvision:
         fmin = th.min(hmap)
         fmap = fmap - fmin
         fmap = fmap / fmax
-        fmap = fmap * 255
+        #fmap = fmap * 255
 
         #imgplot = plt.imshow(fmap.to("cpu").numpy())
         #plt.savefig("fmap.png")

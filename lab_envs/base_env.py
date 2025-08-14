@@ -63,7 +63,7 @@ class BaseEnv(DirectRLEnv):
         stage_utils.add_reference_to_stage(usd_path=scene_usd_path, prim_path = "/World")
         if self.cfg_env["env_cfg"]["feature_extractor"]["type"] == "CNN": 
             self.spaces = {
-            "fmap": spaces.Box(low = 0.0, high = 255.0, shape = (self.cfg_env["env_cfg"]["vision_h"],self.cfg_env["env_cfg"]["vision_w"],1), dtype= np.float32),
+            "fmap": spaces.Box(low = 0.0, high = 1.0, shape = (self.cfg_env["env_cfg"]["vision_h"],self.cfg_env["env_cfg"]["vision_w"],1), dtype= np.int32),
             "tool": spaces.Box(low = -float("inf"), high = float("inf"), shape = (self.cfg_env["env_cfg"]["tool_num_obs"],), dtype= np.float32),
             }
         elif self.cfg_env["env_cfg"]["feature_extractor"]["type"] == "GAT":
@@ -75,7 +75,7 @@ class BaseEnv(DirectRLEnv):
                     edge_num += ((self.cfg_env["env_cfg"]["feature_extractor"]["shape"]) + (i - 1) ) * 2                                                         
             self.spaces = {
             "point_cloud": spaces.Box(low = -float("inf"), high = float("inf"), shape = (self.cfg_env["env_cfg"]["feature_extractor"]["shape"] + 2,3), dtype= np.float32),
-            "edge_index": spaces.Box(low = -float("inf"), high = float("inf"), shape = (2, edge_num), dtype= np.int32),
+            "edge_index": spaces.Box(low = 0, high = (self.cfg_env["env_cfg"]["feature_extractor"]["shape"] + 1), shape = (2, edge_num), dtype= np.int32),
             "edge_attribute": spaces.Box(low = -float("inf"), high = float("inf"), shape = (edge_num, 3), dtype= np.float32),
             "tool": spaces.Box(low = -float("inf"), high = float("inf"), shape = (self.cfg_env["env_cfg"]["tool_num_obs"],), dtype= np.float32),
             }

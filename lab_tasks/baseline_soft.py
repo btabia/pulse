@@ -281,6 +281,9 @@ class BaselineSoft(Basetask):
             "fmap": fmap,
             "tool": tool_obs,
         }
+        import matplotlib.pyplot as plt
+        plt.imshow(fmap[0].cpu().numpy().squeeze())
+        plt.savefig("fmap_obs.png")
         return {"policy": obs}
 
         

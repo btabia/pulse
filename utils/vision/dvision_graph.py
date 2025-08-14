@@ -364,7 +364,7 @@ class Dvision:
         #structured_pcd = o3d.t.geometry.PointCloud(o3c.Tensor.from_dlpack(torch.utils.dlpack.to_dlpack(structured_pc)))
         #o3d.io.write_point_cloud("structured_pcd.ply", structured_pcd.to_legacy())
 
-
+        print("edge index initial : " + str(structured_graph.edge_index))
         return structured_graph
 
 

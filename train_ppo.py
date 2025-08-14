@@ -101,10 +101,10 @@ def setup_training_configuration(cfg, env, wconf) -> None:
         dcfg["entropy_loss_scale"] = cfg["RL"]["algo"]["entropy_loss_scale"]
         dcfg["value_loss_scale"] = cfg["RL"]["algo"]["value_loss_scale"]
         dcfg["kl_threshold"] = cfg["RL"]["algo"]["kl_threshold_stop"]
-        dcfg["state_preprocessor"] = RunningStandardScaler
-        dcfg["state_preprocessor_kwargs"] = {"size": env.observation_space, "device": device}
-        dcfg["value_preprocessor"] = RunningStandardScaler
-        dcfg["value_preprocessor_kwargs"] = {"size": 1, "device": device}
+        dcfg["state_preprocessor"] = None
+        dcfg["state_preprocessor_kwargs"] = {}
+        dcfg["value_preprocessor"] = None
+        dcfg["value_preprocessor_kwargs"] = {}
 
 
 

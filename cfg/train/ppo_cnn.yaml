@@ -21,9 +21,9 @@ RL:
     type: "PPO" 
     feature_extractor: "CNN"
     lstm: False
-    rollouts: 8192
+    rollouts: 32
     learning_epochs: 10
-    mini_batch_size: 128
+    mini_batch_size: 8
     discount_factor: 0.99
     lambda: 0.95
     learning_rate: 1.25e-3
@@ -42,6 +42,7 @@ RL:
     state_preprocessor: RunningStandardScaler
     value_preprocessor: RunningStandardScaler
     device: "cuda:${oc.env:CUDA_DEVICE}"
+    device_model: "cuda:${oc.env:CUDA_DEVICE_MODEL}"
     tensorboard_log: "./training_data/"
 
   experiment: 

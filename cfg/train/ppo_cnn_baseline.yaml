@@ -42,6 +42,7 @@ RL:
     state_preprocessor: RunningStandardScaler
     value_preprocessor: RunningStandardScaler
     device: "cuda:${oc.env:CUDA_DEVICE}"
+    device_model: "cuda:${oc.env:CUDA_DEVICE_MODEL}"
     tensorboard_log: "./training_data/"
 
   experiment: 

@@ -89,6 +89,12 @@ class Shared_PPO_CNN(GaussianMixin, DeterministicMixin, Model):
             space = self.tensor_to_space(states, self.observation_space)
             fmap = space["fmap"]
             vis = fmap.permute(0, 3, 1, 2)
+            #print("fmap: " + str(fmap))
+            # print fmap to a file
+            if vis[0].shape[0] == 1:
+                import matplotlib.pyplot as plt
+                plt.imshow(vis[0][0].cpu().numpy().squeeze())
+                plt.savefig("fmap.png")
             tool_obs = space["tool"]
             vis.to(self.device)
             tool_obs.to(self.device)
