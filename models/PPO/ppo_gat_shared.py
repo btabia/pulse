@@ -93,10 +93,8 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
 
 
         self.post_process = nn.Sequential(
-            nn.Linear(128, 64, device=self.device), 
-            nn.LeakyReLU(0.2),
             nn.Linear(64, 32, device=self.device), 
-            nn.Tanh(),
+            nn.LeakyReLU(0.2),
         )
         
         ### MLP Network set
@@ -134,6 +132,44 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
         elif role == "value":
             return DeterministicMixin.act(self, inputs, role)
     
+    def set_edge_index(self, edge_index):
+        """Set the edge index for the GAT layers."""
+        self.edge_index = edge_index
+    
+    def compute_feature_extraction(self, space):
+            point_cloud = space["point_cloud"]
+            edge_index = self.edge_index
+            edge_attr = space["edge_attribute"]
+
+            point_cloud = point_cloud.to(self.device)
+            edge_index = edge_index.to(self.device)
+            edge_attr.to(self.device)
+
+            edge_index = edge_index.type(torch.int64)
+
+            # encode the point cloud
+            x = self.pre_process(point_cloud)
+
+            data_list_1 = [Data(x=x[i], edge_index=edge_index, edge_attr = edge_attr[i]) for i  in range(point_cloud.shape[0])] 
+            loader_1 = DataLoader(data_list_1, batch_size = point_cloud.shape[0])
+            batch_1 = next(iter(loader_1))
+
+            x = self.gat_conv_1(x = batch_1.x , edge_index = batch_1.edge_index, edge_attr = batch_1.edge_attr)
+            x = F.leaky_relu(x, negative_slope=0.2)
+            # set the edges to one between the point cloud and the tool and zero within the point cloud
+            x = self.gat_conv_2(x = x, edge_index = batch_1.edge_index, edge_attr = batch_1.edge_attr)
+            x = F.leaky_relu(x, negative_slope=0.2)
+            #extract the target and tool features from the point cloud
+            # capture the target and tool features from the point cloud batch
+            x = x.view(point_cloud.shape[0], 258, -1)  # 4096 for the point cloud, 1 for the target, and 1 for the tool
+            target_features = x[:, 256, :]
+            tool_features = x[:, 257, :]
+            # concatenate the target and tool features with the tool observations
+            x = torch.cat([tool_features], dim=-1)
+
+            x = self.post_process(x)
+
+            return x
 
 
     # forward the input to compute model output according to the specified role
@@ -141,121 +177,29 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
     def compute(self, inputs, role):
         if role == "policy":
             states = inputs["states"]
-            print("states shape: " + str(states.shape))
-            print("states: " + str(states))
             space = unflatten_tensorized_space(self.observation_space, states)
-            point_cloud = space["point_cloud"]
-            edge_index = space["edge_index"]
-            edge_attr = space["edge_attribute"]
-
-            point_cloud = point_cloud.to(self.device)
-            edge_index = edge_index.to(self.device)
-            edge_attr.to(self.device)
-            pc_ = point_cloud
-
-            edge_index = edge_index.type(torch.int64)
-
             tool_obs = space["tool"]
             tool_obs = tool_obs.to(self.device)
-        
-            # set the edges to zero between the point cloud and the tool and one within the point cloud
-            #edge_attributes_1 = torch.zeros((batch.edge_index.shape[1], 1), device=self.device)
-            #edge_attributes_2 = torch.zeros((batch.edge_index.shape[1], 1), device=self.device)
-            #edge_attributes_1[0:((4096*4)-1)] = edge_attr[0:((4096*4)-1)]
-            #edge_attributes_2[4096:] = edge_attr[4096:]
-
-            print("edge index model : " + str(edge_index))
-            print("tool obs model : " + str(tool_obs))
-            print("point cloud model : " + str(pc_))
-            print("observation space: " + str(self.observation_space))
-
-            # encode the point cloud
-            x = self.pre_process(pc_)
-
-            data_list_1 = [Data(x=x[i], edge_index=edge_index[i], edge_attr = edge_attr[i]) for i  in range(states.shape[0])] 
-            loader_1 = DataLoader(data_list_1, batch_size = states.shape[0])
-            batch_1 = next(iter(loader_1))
-
-            # set the edges attributes to zero between the point cloud and the tool and one within the point cloud
-            #x1 = x.view(-1, x.shape[-1])
-
-            x = self.gat_conv_1(x = batch_1.x , edge_index = batch_1.edge_index, edge_attr = batch_1.edge_attr)
-            x = F.leaky_relu(x, negative_slope=0.2)
-            # set the edges to one between the point cloud and the tool and zero within the point cloud
-            x = self.gat_conv_2(x = x, edge_index = batch_1.edge_index, edge_attr = batch_1.edge_attr)
-            x = F.leaky_relu(x, negative_slope=0.2)
-
-
-            #extract the target and tool features from the point cloud
-            # capture the target and tool features from the point cloud batch
-            x = x.view(states.shape[0], 4098, -1)  # 4096 for the point cloud, 1 for the target, and 1 for the tool
-            target_features = x[:, 4096, :]
-            tool_features = x[:, 4097, :]
-            # concatenate the target and tool features with the tool observations
-            x = torch.cat([target_features, tool_features], dim=-1)
-
-            x = self.post_process(x)
+    
+            # compute the features from the point cloud
+            x = self.compute_feature_extraction(space)
 
             self._gat_output = torch.cat([x.view(states.shape[0], -1),tool_obs.view(states.shape[0], -1)], dim = -1)
 
             output = torch.tanh(self.policy_layer(self._gat_output))
-            output = output.to(self.device_output)
             return output, self.log_std_parameter, {}
 
         elif role == "value":
             if self._gat_output == None: 
                 states = inputs["states"]
                 space = unflatten_tensorized_space(self.observation_space, states)
-                point_cloud = space["point_cloud"]
-                edge_index = space["edge_index"]
-                #edge_attr = space["edge_attribute"]
-
-                point_cloud.to(self.device)
-                edge_index.to(self.device)
-                #edge_attr.to(self.device)
-                pc_ = point_cloud
-                ed_ = edge_index 
-
-                edge_index = edge_index.type(torch.int64)
-
                 tool_obs = space["tool"]
-                tool_obs.to(self.device)
-            
-                # set the edges to zero between the point cloud and the tool and one within the point cloud
-                #edge_attributes_1 = torch.zeros((batch.edge_index.shape[1], 1), device=self.device)
-                #edge_attributes_2 = torch.zeros((batch.edge_index.shape[1], 1), device=self.device)
-                #edge_attributes_1[0:((4096*4)-1)] = edge_attr[0:((4096*4)-1)]
-                #edge_attributes_2[4096:] = edge_attr[4096:]
-
-                data_list_1 = [Data(x=point_cloud[i], edge_index=edge_index[i]) for i  in range(states.shape[0])] 
-                loader_1 = DataLoader(data_list_1, batch_size = states.shape[0])
-                batch_1 = next(iter(loader_1))
-
-                
-                # encode the point cloud
-                x = self.pre_process(pc_)
-
-                # set the edges attributes to zero between the point cloud and the tool and one within the point cloud
-                x1 = x.view(-1, x.shape[-1])
-                x = self.gat_conv_1(x = x1 , edge_index = batch_1.edge_index)
-                x = F.leaky_relu(x, negative_slope=0.2)
-                # set the edges to one between the point cloud and the tool and zero within the point cloud
-                x = self.gat_conv_2(x = x, edge_index = batch_1.edge_index)
-                x = F.leaky_relu(x, negative_slope=0.2)
-
-
-                #extract the target and tool features from the point cloud
-                # capture the target and tool features from the point cloud batch
-                x = x.view(states.shape[0], 4098, -1)  # 4096 for the point cloud, 1 for the target, and 1 for the tool
-                target_features = x[:, 4096, :]
-                tool_features = x[:, 4097, :]
-                # concatenate the target and tool features with the tool observations
-                x = torch.cat([target_features, tool_features], dim=-1)
-                
-                x = self.post_process(x)
+                tool_obs = tool_obs.to(self.device)
+        
+                # compute the features from the point cloud
+                x = self.compute_feature_extraction(space)
 
                 gat_output = torch.cat([x.view(states.shape[0], -1),tool_obs.view(states.shape[0], -1)], dim = -1)
-
             else: 
                 gat_output =self._gat_output
             self._gat_output = None

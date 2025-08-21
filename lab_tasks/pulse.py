@@ -17,6 +17,7 @@ from utils.vision.dvision_graph import Dvision
 from utils.admittance_controller import AdmittanceController
 
 
+
 class Pulse(Basetask):
     def __init__(self, cfg):
         #import utilities
@@ -29,6 +30,11 @@ class Pulse(Basetask):
         self.episode_cpt = 0
         self.bad_episode = False
         self.sim_prev_time = 0
+
+    def set_model(self, model):
+        """Set the model to be used in the task."""
+        self.model = model
+
 
 
     def initialise_image_array(self):
@@ -268,14 +274,13 @@ class Pulse(Basetask):
         tool_obs = th.nan_to_num(tool_obs)
         obs = {
             "point_cloud": structured_graph.x,  # Ensure x is 2D
-            "edge_index": structured_graph.edge_index,  # Ensure edge_index is 2D
+            #"edge_index": structured_graph.edge_index,  # Ensure edge_index is 2D
             "edge_attribute": structured_graph.edge_attr,  # Ensure edge_attr is 2D
             "tool": tool_obs.squeeze(dim=0),  # Ensure tool_obs is 2D
         }
-        print(" observation edge index: " + str(obs["edge_index"]))
-        print("observation edge index shape: " + str(obs["edge_index"].shape))
-        print("observation tool : " + str(obs["tool"]))
-        print("observation point cloud: " + str(obs["point_cloud"]))
+        # set the edge index directly in the model to avoid data corruption from standard transforms
+        if hasattr(self.model, 'set_edge_index'):
+            self.model.set_edge_index(structured_graph.edge_index)
         return {"policy": obs}
 
 

@@ -21,6 +21,7 @@ from torch.optim.lr_scheduler import StepLR, LinearLR
 #from models.PPO.ppo import PPO_Policy, PPO_Value
 from models.PPO.ppo_cnn_shared import Shared_PPO_CNN
 from models.PPO.ppo_gat_shared import Shared_PPO_GAT
+from models.utils.CustomStatePrepocessor import CustomStatePreprocessor
 
 import wandb
 
@@ -101,10 +102,21 @@ def setup_training_configuration(cfg, env, wconf) -> None:
         dcfg["entropy_loss_scale"] = cfg["RL"]["algo"]["entropy_loss_scale"]
         dcfg["value_loss_scale"] = cfg["RL"]["algo"]["value_loss_scale"]
         dcfg["kl_threshold"] = cfg["RL"]["algo"]["kl_threshold_stop"]
-        dcfg["state_preprocessor"] = None
-        dcfg["state_preprocessor_kwargs"] = {}
-        dcfg["value_preprocessor"] = None
-        dcfg["value_preprocessor_kwargs"] = {}
+        if cfg["RL"]["algo"]["state_preprocessor"] == "RunningStandardScaler":
+            dcfg["state_preprocessor"] = RunningStandardScaler
+            dcfg["state_preprocessor_kwargs"] = {"size": env.observation_space, "device": device}
+        elif cfg["RL"]["algo"]["state_preprocessor"] == "CustomStatePreprocessor":
+            dcfg["state_preprocessor"] = CustomStatePreprocessor
+            dcfg["state_preprocessor_kwargs"] = {"size": env.observation_space, "device": device}
+        else: 
+            dcfg["state_preprocessor"] = None
+            dcfg["state_preprocessor_kwargs"] = {}
+        if cfg["RL"]["algo"]["value_preprocessor"] == "RunningStandardScaler":
+            dcfg["value_preprocessor"] = RunningStandardScaler
+            dcfg["value_preprocessor_kwargs"] = {"size": 1, "device": device}
+        else:
+            dcfg["value_preprocessor"] = None
+            dcfg["value_preprocessor_kwargs"] = {}
 
 
 
@@ -141,7 +153,7 @@ def setup_training_configuration(cfg, env, wconf) -> None:
             print("No policy loaded, using random policy for training")
 
 
-    return model
+    return model, models
 
 
 
@@ -163,11 +175,12 @@ def main(cfg: DictConfig):
     env = gymnasium.make(id="BaseEnv-v0", cfg_env = wandb.config["env"], cfg_task  = wandb.config["tasks"])
     env = wrap_env(env, wrapper="isaaclab")
 
-    model = setup_training_configuration(cfg=wandb.config["train"], 
+    model, gnn = setup_training_configuration(cfg=wandb.config["train"], 
                 env = env,
                 wconf= wandb.config,
                 )
-
+    if wandb.config["train"]["RL"]["algo"]["feature_extractor"] == "GAT":
+        env.set_model(gnn["policy"])
     #wandb.config = cfg
     wandb.init(**cfg.wandb.setup, config=wandb.config, monitor_gym = True, save_code = True, sync_tensorboard = True)
     #wandb.run.log_code(".")

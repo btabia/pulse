@@ -75,7 +75,7 @@ class BaseEnv(DirectRLEnv):
                     edge_num += ((self.cfg_env["env_cfg"]["feature_extractor"]["shape"]) + (i - 1) ) * 2                                                         
             self.spaces = {
             "point_cloud": spaces.Box(low = -float("inf"), high = float("inf"), shape = (self.cfg_env["env_cfg"]["feature_extractor"]["shape"] + 2,3), dtype= np.float32),
-            "edge_index": spaces.Box(low = 0, high = (self.cfg_env["env_cfg"]["feature_extractor"]["shape"] + 1), shape = (2, edge_num), dtype= np.int32),
+            #"edge_index": spaces.Box(low = 0, high = (self.cfg_env["env_cfg"]["feature_extractor"]["shape"] + 1), shape = (2, edge_num), dtype= np.int32),
             "edge_attribute": spaces.Box(low = -float("inf"), high = float("inf"), shape = (edge_num, 3), dtype= np.float32),
             "tool": spaces.Box(low = -float("inf"), high = float("inf"), shape = (self.cfg_env["env_cfg"]["tool_num_obs"],), dtype= np.float32),
             }
@@ -280,6 +280,11 @@ class BaseEnv(DirectRLEnv):
             saving_path = base_dir + "/play_" + algo_type + "_" + str(iteration)
         os.makedirs(saving_path, exist_ok=True)
         return saving_path
+    
+    def set_model(self, model):
+        """Set the model to be used in the environment."""
+        self.task.set_model(model)
+
     
 
 

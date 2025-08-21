@@ -18,7 +18,7 @@ class Dvision:
     def __init__(self, cfg):
         self.cfg = cfg
         self.device = self.cfg["task"]["device"]
-        self.knn_link = 4
+        self.knn_link = 8
 
     def load_vae_model(self):
         #load the general model
@@ -321,14 +321,15 @@ class Dvision:
 
         part_ee_pos = th.zeros((medium_tensor_pc.shape[0], 3), device = self.device)
 
-        part_ee_pos[:,[0]] = medium_tensor_pc[:,[0]].to(self.device) #- ee_position[:,[0]].to(self.device)
-        part_ee_pos[:,[1]] = medium_tensor_pc[:,[1]].to(self.device) #- ee_position[:,[1]].to(self.device)
+        part_ee_pos[:,[0]] = medium_tensor_pc[:,[0]].to(self.device) - ee_position[:,[0]].to(self.device)
+        part_ee_pos[:,[1]] = medium_tensor_pc[:,[1]].to(self.device) - ee_position[:,[1]].to(self.device)
         part_ee_pos[:,[2]] = medium_tensor_pc[:,[2]].to(self.device)
 
 
         structured_pc = self.get_structured_pointcloud(part_ee_pos,(self.cfg["task"]["camera"]["img_w"],self.cfg["task"]["camera"]["img_h"]), device = self.device)
 
         _pos = structured_pc[:,0:2]
+        #print("position : " + str(_pos))
         structured_graph = Data(x = structured_pc, pos = _pos)
         #edge_index, _ = grid(height = 64, width = 64, device = self.device)
         transform = T.Compose([KNNGraph(k = self.knn_link)])
@@ -342,7 +343,9 @@ class Dvision:
         # we add the virtual node which correspond to the target position
         transform = T.Compose([VirtualNode()])
         structured_graph = transform(structured_graph)
-        structured_graph.x[4096] = target_pc[0].to(self.device)
+        #print("target position : " + str(target_pc[0].to(self.device)))
+        structured_graph.x[256] = target_pc[0].to(self.device) - ee_position[0].to(self.device)
+        structured_graph.x[256, 2] = 0.0
 
         #edge_index = structured_graph.edge_index
         #print("edge index shape 1 : " + str(edge_index.shape))
@@ -350,7 +353,7 @@ class Dvision:
         # we add the virtual nodes which correspond to the ee position
         transform = T.Compose([VirtualNode()])
         structured_graph = transform(structured_graph)
-        structured_graph.x[4097] = ee_position[[0]].to(self.device)
+        structured_graph.x[257] = th.zeros((1,3), device = self.device)
 
         # get the edge index sshape
         edge_index = structured_graph.edge_index
@@ -363,8 +366,11 @@ class Dvision:
 
         #structured_pcd = o3d.t.geometry.PointCloud(o3c.Tensor.from_dlpack(torch.utils.dlpack.to_dlpack(structured_pc)))
         #o3d.io.write_point_cloud("structured_pcd.ply", structured_pcd.to_legacy())
-
-        print("edge index initial : " + str(structured_graph.edge_index))
+        # print edge features
+        #print("edge features shape : " + str(structured_graph.edge_attr.shape))
+        #print("edge features : " + str(structured_graph.edge_attr))
+        #print("targe node position : " + str(structured_graph.x[256]))
+        #print("ee node position : " + str(structured_graph.x[257]))
         return structured_graph
 
 
@@ -515,12 +521,12 @@ class Dvision:
                 # Move pointcloud to the specified device
         pointcloud = pointcloud.to(device)
         # Normalize x and y coordinates to fit within heightmap
-        x_min = 0.1
-        y_min = -0.50
-        x_max = 1.1
-        y_max = 0.50
-        #x_min, y_min = pointcloud[:, :2].min(dim=0).values
-        #x_max, y_max = pointcloud[:, :2].max(dim=0).values
+        #x_min = 0.1
+        #y_min = -0.50
+        #x_max = 1.1
+        #y_max = 0.50
+        x_min, y_min = pointcloud[:, :2].min(dim=0).values
+        x_max, y_max = pointcloud[:, :2].max(dim=0).values
         
         # Scale the x, y coordinates to fit within the heightmap grid size
         x_norm = (pointcloud[:, 0] - x_min) / (x_max - x_min) * (map_size[0] - 1)
@@ -569,13 +575,12 @@ class Dvision:
         y_coords = y_coords.flatten()
         heightmap = heightmap.flatten()
 
-        xx = ((x_coords.view(-1, 1).type(th.float32) - (map_size[0] / 2)) / map_size[0]) * (x_max - x_min)
-        yy = ((y_coords.view(-1, 1).type(th.float32) - (map_size[1] / 2)) / map_size[1]) * (y_max - y_min)
+        xx = ((x_coords.view(-1, 1).type(th.float32) - (map_size[0] / 2)) / map_size[0]) * (x_max - x_min) + x_min
+        yy = ((y_coords.view(-1, 1).type(th.float32) - (map_size[1] / 2)) / map_size[1]) * (y_max - y_min) + y_min
         zz = heightmap.view(-1, 1).type(th.float32) 
 
         grid = th.stack((xx, yy, zz), dim=-1)  # Shape: (H, W, 2)
         grid = grid.view(-1, 3)
-
         return grid
 
 

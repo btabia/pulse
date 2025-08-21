@@ -10,9 +10,9 @@ early_terminate:
   eta: 3
 parameters:
   train.RL.algo.rollouts:
-    values: [4096]
+    values: [8192]
   train.RL.algo.mini_batch_size:
-    values: [128]
+    values: [64, 128]
   train.RL.algo.value_loss_scale:
     distribution: uniform
     min: 0.5
