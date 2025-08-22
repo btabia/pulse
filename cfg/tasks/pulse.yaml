@@ -82,8 +82,8 @@ task:
 
   camera:
     intrinsic_matrix: [[[211.03183, 0, 213],[0, 211.03183, 120],[0, 0, 1]]]
-    img_w: 16
-    img_h: 16
+    img_w: 32
+    img_h: 32
     padding: 16
     position: 
       camera_0: [1,0.5,0.5]

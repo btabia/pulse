@@ -13,13 +13,13 @@ env_cfg:
   action_scale : [0.025, 0.025, 20] #Dx, Dy, Dtheta
   feature_extractor: 
     type: "GAT"
-    shape: 256 
+    shape: 1024 
     k_neighbour: 8
     virtual_node_link: 2
   num_actions : 3
   tool_num_obs: 3
-  vision_h: 128
-  vision_w: 128
+  vision_h: 32
+  vision_w: 32
   state_space : 0
   device: "cpu" #"cuda:${oc.decode:${oc.env:CUDA_DEVICE}}"
   seed: 42
