@@ -94,7 +94,6 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
 
         self.post_process = nn.Sequential(
             nn.Linear(64, 32, device=self.device), 
-            nn.LeakyReLU(0.2),
         )
         
         ### MLP Network set
