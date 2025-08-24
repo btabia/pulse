@@ -13,7 +13,7 @@ env_cfg:
   action_scale : [0.025, 0.025, 20] #Dx, Dy, Dtheta
   feature_extractor: 
     type: "GAT"
-    shape: 1024 
+    shape: 256 
     k_neighbour: 8
     virtual_node_link: 2
   num_actions : 3

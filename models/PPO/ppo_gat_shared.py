@@ -47,7 +47,7 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
         self.device = device
         self.device_output = device_output
         self.num_robot_obs = num_robot_obs
-        self.number_nodes = 1024 + 2 # point cloud + target + tool
+        self.number_nodes = 256 + 2 # point cloud + target + tool
 
 
         ##### GAT config #####
@@ -56,7 +56,7 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
         self.gat_hidden_channels_2 = 64
         self.gat_out_channels = 64
 
-        self.gat_heads_1 = 4
+        self.gat_heads_1 = 8
         self.gat_heads_2 = 1
         self.edge_attr_dim = 3  # Assuming edge attributes are 3-dimensional
 
