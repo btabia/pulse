@@ -47,8 +47,15 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
         self.device = device
         self.device_output = device_output
         self.num_robot_obs = num_robot_obs
-        self.number_nodes = 256 + 2 # point cloud + target + tool
-
+        self.cnn_output = 32
+        self.dropout_prob = 0
+        self.gat_hidden_features = 128
+        self.gat_output_features = 32
+        self.lstm_output_features = 32
+        self.lstm_hidden_size = 64
+        self.sequence_length = 128
+        self.lstm_num_layers = 1
+        self.obs_feature_size = 2837 # self.num_robot_obs + self.lstm_output_features
 
         ##### GAT config #####
         self.gat_in_channels = 8
@@ -56,7 +63,7 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
         self.gat_hidden_channels_2 = 64
         self.gat_out_channels = 64
 
-        self.gat_heads_1 = 8
+        self.gat_heads_1 = 4
         self.gat_heads_2 = 1
         self.edge_attr_dim = 3  # Assuming edge attributes are 3-dimensional
 
@@ -86,7 +93,7 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
 
 
         self.post_process = nn.Sequential(
-            nn.Linear(self.gat_hidden_channels_2, 32, device=self.device), 
+            nn.Linear(64, 32, device=self.device), 
         )
         
         ### MLP Network set
@@ -153,8 +160,9 @@ class Shared_PPO_GAT(GaussianMixin, DeterministicMixin, Model):
             x = F.leaky_relu(x, negative_slope=0.2)
             #extract the target and tool features from the point cloud
             # capture the target and tool features from the point cloud batch
-            x = x.view(point_cloud.shape[0], self.number_nodes, -1)  # 4096 for the point cloud, 1 for the target, and 1 for the tool
-            tool_features = x[:, (self.number_nodes - 1), :]
+            x = x.view(point_cloud.shape[0], 258, -1)  # 4096 for the point cloud, 1 for the target, and 1 for the tool
+            target_features = x[:, 256, :]
+            tool_features = x[:, 257, :]
             # concatenate the target and tool features with the tool observations
             x = torch.cat([tool_features], dim=-1)
 

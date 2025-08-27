@@ -11,5 +11,5 @@ defaults:
     - app: lab_app
     - env: baseline_gat
     - tasks: pulse
-    - play: baseline_gat
+    - play: ppo_gat
 

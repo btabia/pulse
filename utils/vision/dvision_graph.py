@@ -364,7 +364,7 @@ class Dvision:
         transform = T.Compose([Cartesian(norm = False, cat = False)])
         structured_graph = transform(structured_graph)
 
-        #structured_pcd = o3d.t.geometry.PointCloud(o3c.Tensor.from_dlpack(torch.utils.dlpack.to_dlpack(structured_pc)))
+        #structured_pcd = o3d.t.geometry.PointCloud(o3c.Tensor.from_dlpack(torch.utils.dlpack.to_dlpack(structured_graph.x)))
         #o3d.io.write_point_cloud("structured_pcd.ply", structured_pcd.to_legacy())
         # print edge features
         #print("edge features shape : " + str(structured_graph.edge_attr.shape))

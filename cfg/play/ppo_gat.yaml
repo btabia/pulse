@@ -1,0 +1,63 @@
+---
+RL:
+  policy: PPO
+  max_timestep: 1600000
+  headless: True
+  disable_progressbar: True
+  checkpoint:
+    saving_freq: 50000
+    base_directory: "./training_data/"
+  vision_h: 16
+  vision_w: 16
+  tool_num_obs: 3
+  load_policy: True
+  load_policy_path: "/home/btabia/git/pulse/training_data/25-08-20_12-28-55-211638_PPO/checkpoints/best_agent.pt"
+  seed: 42
+
+  
+  algo:
+    activation: "relu"
+    arch: [128,128]
+    type: "PPO" 
+    feature_extractor: "GAT"
+    lstm: False
+    rollouts: 32
+    learning_epochs: 10
+    mini_batch_size: 8
+    discount_factor: 0.99
+    lambda: 0.95
+    learning_rate: 1.25e-3
+    learning_rate_scheduler: KLAdaptiveRL
+    kl_threshold: 0.02038574160367481
+    kl_threshold_stop: 0.0
+    lr_gamma: 0.97
+    max_lr: 1e-3
+    min_lr: 1e-7
+    grad_norm_clip: 0.5516627344833842
+    ratio_clip: 0.20
+    value_clip: 0.20
+    clip_predicted_values: False
+    entropy_loss_scale: 0.0
+    value_loss_scale: 0.7629891938764854
+    state_preprocessor: RunningStandardScaler # get the state preprocessor from the environment, without changing the edge index
+    value_preprocessor: RunningStandardScaler
+    device: "cuda:${oc.env:CUDA_DEVICE}"
+    device_model: "cuda:${oc.env:CUDA_DEVICE_MODEL}"
+    tensorboard_log: "./training_data/"
+
+  experiment: 
+    directory: "./training_data/"
+    experiment_name: ""
+    write_interval: 512 # Not used, we use the rollout value instead
+    checkpoint_interval: 1000
+    store_separately: False
+    wandb: True 
+    wandb_kwargs: 
+      project: malleabot_ppo
+      mode: online
+      monitor_gym: True
+      sync_tensorboard: True
+
+
+
+
